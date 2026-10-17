@@ -1,0 +1,23 @@
+{
+  "name": "jkay-crm",
+  "private": true,
+  "version": "0.1.0",
+  "description": "JKAY Racks CRM — CRE desk, BD desk and Admin console",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "engines": {
+    "node": "22.x"
+  },
+  "scripts": {
+    "postinstall": "npm run build -w @jkay/shared",
+    "dev": "npm run dev --workspaces --if-present",
+    "build": "npm run build -w @jkay/shared && npm run build -w @jkay/web && npm run build -w @jkay/server",
+    "start": "npm run start -w @jkay/server",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "db:generate": "npm run db:generate -w @jkay/server",
+    "db:migrate": "npm run db:migrate -w @jkay/server",
+    "db:seed": "npm run db:seed -w @jkay/server"
+  }
+}
