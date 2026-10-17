@@ -1,37 +1,36 @@
-import { useQuery } from '@tanstack/react-query';
-import { Navigate, Route, Routes } from 'react-router-dom';
+import { Navigate, Route, Routes, useLocation } from 'react-router-dom';
+import type { ReactNode } from 'react';
+import type { Role } from '@jkay/shared';
+import { useMe, homeFor } from './lib/session';
+import { Login } from './pages/Login';
+import { CreDesk } from './desks/cre/CreDesk';
+import { AdminConsole } from './desks/admin/AdminConsole';
+import { BdDesk } from './desks/bd/BdDesk';
 
-/**
- * Phase 1 shell. Each role gets its own area; nothing links across roles.
- *   /admin/*  Admin console     /cre/*  CRE desk     /bd/*  BD desk
- * Login, role routing and the real screens arrive in the next phases.
- */
-function Health() {
-  const { data, error, isLoading } = useQuery({
-    queryKey: ['health'],
-    queryFn: async () => {
-      const r = await fetch('/api/health');
-      if (!r.ok) throw new Error(`API answered ${r.status}`);
-      return (await r.json()) as { ok: boolean; time: string };
-    },
-  });
-  return (
-    <div className="app-shell" style={{ display: 'grid', placeItems: 'center', minHeight: '100vh' }}>
-      <div className="panel" style={{ padding: 24, minWidth: 320 }}>
-        <div className="plate" style={{ fontWeight: 600, marginBottom: 8 }}>JKAY · RACKS CRM</div>
-        <div style={{ color: 'var(--text-muted)', fontSize: 13 }}>
-          {isLoading ? 'Checking the server…' : error ? `Server not reachable — ${(error as Error).message}` : `Server OK · ${data?.time}`}
-        </div>
-      </div>
-    </div>
-  );
+/** Each role lives in its own area; nothing links across roles. */
+function Guard({ role, children }: { role: Role; children: ReactNode }) {
+  const { data: me, isLoading } = useMe();
+  const loc = useLocation();
+  if (isLoading) return <div className="center-note">Loading…</div>;
+  if (!me) return <Navigate to="/login" replace state={{ from: loc.pathname }} />;
+  if (me.role !== role) return <Navigate to={homeFor(me.role)} replace />;
+  return <>{children}</>;
+}
+
+function Home() {
+  const { data: me, isLoading } = useMe();
+  if (isLoading) return <div className="center-note">Loading…</div>;
+  return <Navigate to={me ? homeFor(me.role) : '/login'} replace />;
 }
 
 export function App() {
   return (
     <Routes>
-      <Route path="/" element={<Health />} />
-      <Route path="*" element={<Navigate to="/" replace />} />
+      <Route path="/login" element={<Login />} />
+      <Route path="/admin/*" element={<Guard role="admin"><AdminConsole /></Guard>} />
+      <Route path="/cre/*" element={<Guard role="cre"><CreDesk /></Guard>} />
+      <Route path="/bd/*" element={<Guard role="bde"><BdDesk /></Guard>} />
+      <Route path="*" element={<Home />} />
     </Routes>
   );
 }

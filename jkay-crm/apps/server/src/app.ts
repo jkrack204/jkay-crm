@@ -17,6 +17,7 @@ import { employeeRoutes } from './routes/employees.js';
 import { configRoutes } from './routes/config.js';
 import { leadRoutes } from './routes/leads.js';
 import { creRoutes } from './routes/cre.js';
+import { notificationRoutes } from './routes/notifications.js';
 
 declare module 'fastify' {
   interface FastifyInstance {
@@ -61,6 +62,7 @@ export async function buildApp(env: Env, db: DB, opts: { logger?: boolean; serve
   await app.register(configRoutes, { prefix: '/api/config' });
   await app.register(leadRoutes, { prefix: '/api/leads' });
   await app.register(creRoutes, { prefix: '/api/cre' });
+  await app.register(notificationRoutes, { prefix: '/api/notifications' });
 
   const webDist = fileURLToPath(new URL('../../web/dist', import.meta.url));
   if (opts.serveWeb !== false && existsSync(webDist)) {

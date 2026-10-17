@@ -4,7 +4,7 @@
  */
 import type { FastifyPluginAsync } from 'fastify';
 import { and, asc, desc, eq, isNull, ne, or } from 'drizzle-orm';
-import { createLeadInput, normalizePhone, noteInput, noteUpdateInput, NOTE_COLORS, type NoteScope } from '@jkay/shared';
+import { createLeadInput, normalizePhone, noteInput, noteUpdateInput, NOTE_COLORS, PLATFORM_LABEL, type NoteScope } from '@jkay/shared';
 import {
   activities,
   categories,
@@ -193,7 +193,7 @@ export const leadRoutes: FastifyPluginAsync = async (app) => {
         .returning();
       if (!l) throw new Error('insert failed');
       await changeOwner(tx, l, { ownerId: null, desk: 'cre', reason: 'intake', byId: admin.id, note: 'Added by hand' });
-      await logActivity(tx, { leadId: l.id, actorId: admin.id, desk: 'cre', kind: 'created', title: 'Lead added by hand', body: input.platform });
+      await logActivity(tx, { leadId: l.id, actorId: admin.id, desk: 'cre', kind: 'created', title: 'Lead added by hand', body: `Source: ${PLATFORM_LABEL[input.platform]}` });
 
       if (input.route === 'cre' || input.route === 'bd') {
         if (!input.ownerId) throw badRequest('Pick who owns it');

@@ -13,6 +13,12 @@ const DUMMY = 'scrypt$16384$8$1$AAAAAAAAAAAAAAAAAAAAAA==$' + 'A'.repeat(86) + '=
 const fails = new Map<string, { n: number; until: number }>();
 const WINDOW = 15 * 60 * 1000;
 
+// Forget expired entries every 15 minutes so the map can't grow forever.
+setInterval(() => {
+  const now = Date.now();
+  for (const [k, v] of fails) if (v.until <= now) fails.delete(k);
+}, WINDOW).unref();
+
 export const authRoutes: FastifyPluginAsync = async (app) => {
   app.post('/login', async (req, reply) => {
     const { username, password } = parse(loginInput, req.body);

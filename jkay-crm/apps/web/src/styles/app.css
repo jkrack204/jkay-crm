@@ -1,0 +1,111 @@
+/* Styles for screens the mockups didn't have (login, shared bits). Uses the design tokens. */
+
+.login-wrap {
+  min-height: 100vh; display: grid; place-items: center; padding: 24px 16px;
+  background: var(--paper);
+}
+.login-card {
+  width: 100%; max-width: 380px; background: var(--surface);
+  border: var(--border-hairline); border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-raised); padding: 28px 26px 24px;
+}
+.login-card .plate { font-weight: 600; letter-spacing: .08em; font-size: 15px; color: var(--text-strong); }
+.login-card .plate span { color: var(--signal-amber); margin: 0 2px; }
+.login-card h1 { font-size: 20px; margin: 18px 0 4px; color: var(--text-strong); letter-spacing: -.015em; }
+.login-card .sub { font-size: 13px; color: var(--text-muted); margin-bottom: 18px; }
+.login-card form { display: flex; flex-direction: column; gap: 12px; }
+.login-card .btn { width: 100%; justify-content: center; margin-top: 4px; }
+.login-card .err {
+  font-size: 13px; color: var(--signal-red); background: var(--signal-red-dim);
+  border-radius: var(--radius-sm); padding: 8px 10px;
+}
+.login-card .foot { margin-top: 16px; font-size: 12px; color: var(--text-muted); line-height: 1.5; }
+.login-theme { position: fixed; top: 14px; right: 14px; }
+
+.center-note { min-height: 60vh; display: grid; place-items: center; color: var(--text-muted); font-size: 14px; }
+
+/* "which desk" placeholder for screens not built yet */
+.soon {
+  max-width: 560px; margin: 48px auto; text-align: center; padding: 28px;
+  border: 1px dashed var(--line); border-radius: var(--radius-lg); color: var(--text-muted); font-size: 14px; line-height: 1.6;
+}
+.soon b { color: var(--text-strong); display: block; font-size: 16px; margin-bottom: 6px; }
+
+/* Owner log on the lead sheet */
+.owners { display: flex; flex-direction: column; gap: 0; }
+.owner-row {
+  display: grid; grid-template-columns: 14px 1fr auto; gap: 10px; align-items: start;
+  padding: 8px 0; border-bottom: 1px solid var(--row-line); font-size: 13px;
+}
+.owner-row:last-child { border-bottom: none; }
+.owner-row .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--steel-600); margin-top: 5px; }
+.owner-row.now .dot { background: var(--signal-green); box-shadow: 0 0 0 3px var(--signal-green-dim); }
+.owner-row .who { color: var(--text-strong); font-weight: 600; }
+.owner-row .why { color: var(--text-muted); font-size: 12px; margin-top: 1px; }
+.owner-row .span { color: var(--text-muted); font-size: 12px; text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+
+.err-inline { color: var(--signal-red); font-size: 12.5px; }
+.contact-btns { display: inline-flex; gap: 6px; flex-wrap: wrap; }
+a.btn { text-decoration: none; }
+
+/* Notification bell — shared by every desk (lifted from the CRE mockup). */
+  .bell {
+    position: relative; width: 30px; height: 30px; border-radius: 8px;
+    display: flex; align-items: center; justify-content: center;
+    border: 1px solid var(--steel-700); background: var(--surface);
+    color: var(--text-secondary); font-size: 15.5px; cursor: pointer; flex-shrink: 0;
+    transition: background var(--t), color var(--t), border-color var(--t);
+  }
+  .bell:hover { background: var(--steel-850); color: var(--text-strong) }
+  .bell.on { background: var(--accent-tint); border-color: #e0cfbd; color: var(--accent-hover) }
+  .bell .count {
+    position: absolute; top: -4px; right: -4px; min-width: 15px; height: 15px; padding: 0 3px;
+    border-radius: 8px; background: var(--signal-red); color: #fff;
+    font-size: 10.5px; font-weight: 700; line-height: 15px; text-align: center;
+    font-variant-numeric: tabular-nums; border: 1.5px solid var(--paper);
+  }
+  .bell .count[hidden] { display: none }
+
+  .notif-wrap { position: relative }
+  .notif {
+    position: absolute; top: calc(100% + 9px); right: 0; width: 352px; max-width: calc(100vw - 24px);
+    background: var(--surface); border: var(--border-hairline); border-radius: 12px;
+    box-shadow: 0 18px 48px rgba(31,30,28,.18); z-index: 80; overflow: hidden;
+    opacity: 0; visibility: hidden; transform: translateY(-4px);
+    transition: opacity var(--t), transform var(--t), visibility var(--t);
+  }
+  .notif.on { opacity: 1; visibility: visible; transform: none }
+  .notif__head {
+    display: flex; align-items: center; gap: 9px; padding: 10px 13px;
+    border-bottom: 1px solid var(--line-soft); background: var(--hover-soft);
+  }
+  .notif__head h3 { font-size: 12px; letter-spacing: .06em; text-transform: uppercase; color: var(--text-muted); font-weight: 600; margin: 0 }
+  .notif__head .act { margin-left: auto; font-size: 11.5px; color: var(--text-muted); cursor: pointer }
+  .notif__head .act:hover { color: var(--accent-hover) }
+  .notif__list { max-height: 384px; overflow-y: auto }
+  .nitem {
+    display: grid; grid-template-columns: 20px 1fr; gap: 9px; align-items: start;
+    padding: 10px 13px; border-bottom: 1px solid var(--row-line); cursor: pointer;
+    transition: background var(--t);
+  }
+  .nitem:last-child { border-bottom: none }
+  .nitem:hover { background: var(--hover-soft) }
+  .nitem.unread { background: var(--sel-soft) }
+  .nitem .ico {
+    width: 20px; height: 20px; border-radius: 6px; display: flex; align-items: center; justify-content: center;
+    font-size: 10.5px; font-weight: 700; flex-shrink: 0; margin-top: 1px;
+  }
+  .nitem .t { font-size: 13px; color: var(--text-strong); font-weight: 600; line-height: 1.35 }
+  .nitem .m { font-size: 12px; color: var(--text-muted); line-height: 1.45; margin-top: 2px }
+  .nitem .at { font-size: 11px; color: var(--steel-500); margin-top: 3px; font-variant-numeric: tabular-nums }
+  .nitem.unread .t::after {
+    content: ''; display: inline-block; width: 5px; height: 5px; border-radius: 50%;
+    background: var(--signal-red); margin-left: 6px; vertical-align: middle;
+  }
+  .notif__foot { padding: 9px 13px; border-top: 1px solid var(--line-soft); background: var(--hover-soft); font-size: 11.5px; color: var(--text-muted); line-height: 1.5 }
+
+/* Scoping each desk's styles (.desk-cre .app-shell …) made them outrank the design
+   system's phone rule — restore the single-column layout under 900px. */
+@media (max-width: 900px) {
+  .desk-cre .app-shell, .desk-admin .app-shell, .desk-bd .app-shell { grid-template-columns: 1fr; }
+}

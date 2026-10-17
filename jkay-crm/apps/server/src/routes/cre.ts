@@ -45,6 +45,9 @@ import {
 import { leadDetail } from './leads.js';
 
 const DEFAULT_MAX_OPEN = 30;
+/** "19 Oct, 10:00 am" in IST, for activity-log text. */
+const ist = (iso: string) =>
+  new Date(iso).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', day: '2-digit', month: 'short', hour: 'numeric', minute: '2-digit' });
 
 /* ------------------------------- list rows ------------------------------ */
 async function listRows(q: Q, rows: Lead[]) {
@@ -287,7 +290,7 @@ export const creRoutes: FastifyPluginAsync = async (app) => {
         desk: 'cre',
         kind: 'stage',
         title: `Stage set to ${stage.name}${tagName ? ' · ' + tagName : ''}`,
-        body: input.followupAt ? `Next follop ${input.followupAt}` : null,
+        body: input.followupAt ? `Next follop ${ist(input.followupAt)}` : null,
         meta: { stageId: stage.id, stageTagId },
       });
       await notifyWatchers(tx, l.id, `${l.customerName} moved to ${stage.name}`, undefined, u.id);
@@ -302,7 +305,15 @@ export const creRoutes: FastifyPluginAsync = async (app) => {
     await db.transaction(async (tx) => {
       const l = await owned(tx, u, req.params.id);
       await setFollowup(tx, l, l.ownerId ?? u.id, new Date(input.dueAt), input.note ?? null, u.id);
-      await logActivity(tx, { leadId: l.id, actorId: u.id, desk: 'cre', kind: 'followup', title: 'Follop scheduled', body: input.note ?? null, meta: { dueAt: input.dueAt } });
+      await logActivity(tx, {
+        leadId: l.id,
+        actorId: u.id,
+        desk: 'cre',
+        kind: 'followup',
+        title: `Follop scheduled for ${ist(input.dueAt)}`,
+        body: input.note ?? null,
+        meta: { dueAt: input.dueAt },
+      });
     });
     return detail(u, req.params.id);
   });
@@ -325,7 +336,14 @@ export const creRoutes: FastifyPluginAsync = async (app) => {
     const input = parse(callLogInput, req.body);
     await db.transaction(async (tx) => {
       const l = await owned(tx, u, req.params.id);
-      await logActivity(tx, { leadId: l.id, actorId: u.id, desk: 'cre', kind: 'call', title: 'Call logged', body: input.summary });
+      await logActivity(tx, {
+        leadId: l.id,
+        actorId: u.id,
+        desk: 'cre',
+        kind: 'call',
+        title: input.nextFollowupAt ? `Call logged · next follop ${ist(input.nextFollowupAt)}` : 'Call logged',
+        body: input.summary,
+      });
       await tx.update(leads).set({ lastContactAt: new Date() }).where(eq(leads.id, l.id));
       if (input.nextFollowupAt) await setFollowup(tx, l, l.ownerId ?? u.id, new Date(input.nextFollowupAt), null, u.id);
       else await closeOpenFollowup(tx, l.id, 'done');
