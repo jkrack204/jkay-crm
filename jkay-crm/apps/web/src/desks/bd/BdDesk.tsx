@@ -1,5 +1,6 @@
 import { useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
+import { Logo } from '../../components/Logo';
 import { logout, useMe } from '../../lib/session';
 import { ThemeSwitch } from '../../components/ui';
 
@@ -14,6 +15,9 @@ export function BdDesk() {
         <ThemeSwitch />
       </div>
       <div className="soon">
+        <div style={{ marginBottom: 14 }}>
+          <Logo height={20} />
+        </div>
         <b>BD desk — coming next</b>
         Hi {me?.fullName}. Deals handed to you by the CRE desk are already being recorded; the BD desk screens arrive in the next build.
         <div style={{ marginTop: 16 }}>

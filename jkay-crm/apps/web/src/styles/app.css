@@ -109,3 +109,11 @@ a.btn { text-decoration: none; }
 @media (max-width: 900px) {
   .desk-cre .app-shell, .desk-admin .app-shell, .desk-bd .app-shell { grid-template-columns: 1fr; }
 }
+
+/* Logo: show the light or dark wordmark to match the theme */
+.logo { display: inline-flex; align-items: center; }
+.logo img { display: block; width: auto; }
+.logo--dark { display: none !important; }
+[data-theme='dark'] .logo--light { display: none !important; }
+[data-theme='dark'] .logo--dark { display: block !important; }
+.sidebar__brand .plate .logo, .login-card .plate .logo { margin-bottom: 4px; }

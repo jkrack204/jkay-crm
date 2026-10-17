@@ -7,6 +7,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { NavLink, Route, Routes, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../lib/api';
+import { Logo } from '../../components/Logo';
 import { logout, useConfig, useMe } from '../../lib/session';
 import { initials } from '../../lib/format';
 import { Bell, ThemeSwitch } from '../../components/ui';
@@ -65,7 +66,7 @@ export function CreDesk() {
         <aside className={`sidebar ${navOpen ? 'open' : ''}`}>
           <div className="sidebar__brand">
             <div className="plate">
-              JKAY<span>·</span>RACKS
+              <Logo height={17} />
             </div>
             <div className="sub">CRE Desk</div>
           </div>

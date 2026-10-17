@@ -7,6 +7,7 @@ import { NavLink, Route, Routes, useLocation, useNavigate } from 'react-router-d
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { PLATFORMS, PLATFORM_LABEL, ROLES, type Role } from '@jkay/shared';
 import { api } from '../../lib/api';
+import { Logo } from '../../components/Logo';
 import { logout, useConfig, useMe } from '../../lib/session';
 import { initials, phone } from '../../lib/format';
 import type { Employee } from '../../lib/types';
@@ -60,7 +61,7 @@ export function AdminConsole() {
         <aside className={`sidebar ${navOpen ? 'open' : ''}`}>
           <div className="sidebar__brand">
             <div className="plate">
-              JKAY<span>·</span>RACKS
+              <Logo height={17} />
             </div>
             <div className="sub">Admin</div>
           </div>

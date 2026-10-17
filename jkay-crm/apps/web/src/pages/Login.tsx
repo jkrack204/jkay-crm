@@ -1,4 +1,5 @@
 import { useState, type FormEvent } from 'react';
+import { Logo } from '../components/Logo';
 import { useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../lib/api';
@@ -37,7 +38,7 @@ export function Login() {
       </div>
       <div className="login-card">
         <div className="plate">
-          JKAY<span>·</span>RACKS
+          <Logo height={22} />
         </div>
         <h1>Sign in</h1>
         <div className="sub">CRE desk, BD desk and Admin console</div>
