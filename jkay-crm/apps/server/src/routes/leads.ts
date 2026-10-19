@@ -7,6 +7,7 @@ import { and, asc, desc, eq, isNull, ne, or } from 'drizzle-orm';
 import { createLeadInput, normalizePhone, noteInput, noteUpdateInput, NOTE_COLORS, PLATFORM_LABEL, type NoteScope } from '@jkay/shared';
 import {
   activities,
+  attachments,
   categories,
   followups,
   leadOwners,
@@ -56,7 +57,7 @@ export async function leadDetail(q: Q, u: SessionUser, l: Lead) {
   const creView = u.role === 'cre';
   const handedOff = l.desk === 'bd';
 
-  const [stageRows, tagRows, noteRows, actRows, ownerRows, [fu], catRows] = await Promise.all([
+  const [stageRows, tagRows, noteRows, actRows, ownerRows, [fu], catRows, photoRows] = await Promise.all([
     q.select().from(stages),
     q
       .select({ id: tags.id, name: tags.name, tone: tags.tone, scope: tags.scope, addedAt: leadTags.addedAt })
@@ -72,6 +73,11 @@ export async function leadDetail(q: Q, u: SessionUser, l: Lead) {
     q.select().from(leadOwners).where(eq(leadOwners.leadId, l.id)).orderBy(asc(leadOwners.startedAt)),
     q.select().from(followups).where(and(eq(followups.leadId, l.id), eq(followups.status, 'open'))),
     l.categoryId ? q.select().from(categories).where(eq(categories.id, l.categoryId)) : Promise.resolve([]),
+    q
+      .select()
+      .from(attachments)
+      .where(and(eq(attachments.leadId, l.id), eq(attachments.kind, 'photo'), isNull(attachments.deletedAt)))
+      .orderBy(asc(attachments.createdAt)),
   ]);
   const st = new Map(stageRows.map((s) => [s.id, s]));
   const names = await namesOf(q, [
@@ -81,6 +87,7 @@ export async function leadDetail(q: Q, u: SessionUser, l: Lead) {
     ...noteRows.map((n) => n.authorId),
     ...actRows.map((a) => a.actorId),
     ...ownerRows.flatMap((o) => [o.ownerId, o.byId]),
+    ...photoRows.map((p) => p.uploadedById),
   ]);
   const stageTag = l.stageTagId ? (await q.select().from(tags).where(eq(tags.id, l.stageTagId)))[0] : undefined;
   const lostReason = l.lostReasonId ? (await q.select().from(tags).where(eq(tags.id, l.lostReasonId)))[0] : undefined;
@@ -141,6 +148,14 @@ export async function leadDetail(q: Q, u: SessionUser, l: Lead) {
       body: a.body,
       by: a.actorId ? (names.get(a.actorId) ?? '—') : 'System',
       at: a.at,
+    })),
+    /** Site photos — taken on the CRE desk, visible to the BDE after hand-off. Open via /api/files/:id. */
+    photos: photoRows.map((p) => ({
+      id: p.id,
+      fileName: p.fileName,
+      by: p.uploadedById ? (names.get(p.uploadedById) ?? '—') : '—',
+      mine: p.uploadedById === u.id,
+      at: p.createdAt,
     })),
     owners: ownerRows.map((o) => ({
       owner: o.ownerId ? (names.get(o.ownerId) ?? '—') : 'Unclaimed pool',

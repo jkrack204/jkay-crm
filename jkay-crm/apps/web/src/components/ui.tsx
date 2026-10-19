@@ -118,9 +118,12 @@ const N_KIND: Record<string, { ico: string; bg: string; fg: string }> = {
   move: { ico: '→', bg: '#eff3f8', fg: '#40628f' },
   won: { ico: '✓', bg: '#edf6f0', fg: '#2f6741' },
   lost: { ico: '✕', bg: '#fdefee', fg: '#9e433b' },
+  visit: { ico: '⌖', bg: '#eff3f8', fg: '#3c5d87' },
+  balance: { ico: '₹', bg: '#fdf3e2', fg: '#8a6a22' },
+  discount: { ico: '%', bg: '#f4f0fb', fg: '#5c4b9b' },
 };
 
-export function Bell({ onOpenLead }: { onOpenLead: (leadId: string) => void }) {
+export function Bell({ onOpenLead, footer }: { onOpenLead: (leadId: string, kind: string) => void; footer?: string }) {
   const [open, setOpen] = useState(false);
   const qc = useQueryClient();
   const { data } = useQuery({
@@ -161,7 +164,7 @@ export function Bell({ onOpenLead }: { onOpenLead: (leadId: string) => void }) {
                 onClick={() => {
                   if (!n.read) readOne.mutate(n.id);
                   setOpen(false);
-                  if (n.leadId) onOpenLead(n.leadId);
+                  if (n.leadId) onOpenLead(n.leadId, n.kind);
                 }}
               >
                 <span className="ico" style={{ background: k.bg, color: k.fg }}>
@@ -179,7 +182,7 @@ export function Bell({ onOpenLead }: { onOpenLead: (leadId: string) => void }) {
             );
           })}
         </div>
-        <div className="notif__foot">Hand-offs, transfers and follop reminders arrive here.</div>
+        <div className="notif__foot">{footer ?? 'Hand-offs, transfers and follop reminders arrive here.'}</div>
       </div>
     </div>
   );

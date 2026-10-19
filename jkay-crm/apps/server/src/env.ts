@@ -16,6 +16,12 @@ const schema = z.object({
   BUCKET_ACCESS_KEY_ID: z.string().optional(),
   BUCKET_SECRET_ACCESS_KEY: z.string().optional(),
   BUCKET_REGION: z.string().default('us-east-1'),
+  BUCKET_PATH_STYLE: z
+    .enum(['true', 'false'])
+    .default('false')
+    .transform((v) => v === 'true'),
+  /** Dev/tests only: keep uploaded files in this folder when no bucket is configured. */
+  STORAGE_LOCAL_DIR: z.string().optional(),
 
   EMAIL_FROM: z.string().default('JKAY CRM <alerts@jkayracks.in>'),
   RESEND_API_KEY: z.string().optional(),

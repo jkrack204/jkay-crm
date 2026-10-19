@@ -6,6 +6,7 @@ import { useConfig, useMe } from '../../lib/session';
 import { friendly, phone, platformLabel, toneClass, when } from '../../lib/format';
 import type { LeadDetail } from '../../lib/types';
 import { useAction } from '../../components/ui';
+import { Photos } from '../../components/Photos';
 import { PLAT_KEY } from './CreList';
 import { CallModal, ClaimModal, FollopModal, HandoffModal, LostModal, StageModal, TransferModal, WhatsAppModal } from './CreModals';
 
@@ -156,10 +157,9 @@ export function LeadSheet({ leadId, onClose }: { leadId: string; onClose: () => 
                 </div>
               )}
             </div>
-            <div className="hint" style={{ marginTop: 10 }}>
-              Site photos upload arrives with file storage in the next phase.
-            </div>
           </div>
+
+          {(mine || d.photos.length > 0) && <Photos d={d} canAdd={mine} aux={mine ? 'BD sees these after hand-off' : undefined} />}
 
           {l.desk === 'bd' && (
             <div className="d-sec">
@@ -392,7 +392,7 @@ function Tags({ d, freeTags }: { d: LeadDetail; freeTags: { id: number; name: st
 }
 
 /* ---------------------------------- notes -------------------------------- */
-function Notes({ d, canAdd }: { d: LeadDetail; canAdd: boolean }) {
+export function Notes({ d, canAdd }: { d: LeadDetail; canAdd: boolean }) {
   const id = d.lead.id;
   const [text, setText] = useState('');
   const [color, setColor] = useState<string>(NOTE_COLORS[0]);
@@ -461,7 +461,7 @@ const REASON: Record<string, string> = {
   reassign: 'Reassigned by Admin',
   release: 'Released to the pool',
 };
-function Owners({ d }: { d: LeadDetail }) {
+export function Owners({ d }: { d: LeadDetail }) {
   const rows = [...d.owners].reverse();
   return (
     <div className="d-sec">
@@ -502,7 +502,7 @@ function Owners({ d }: { d: LeadDetail }) {
 }
 
 /* -------------------------------- activity ------------------------------- */
-function Activity({ d }: { d: LeadDetail }) {
+export function Activity({ d }: { d: LeadDetail }) {
   return (
     <div className="d-sec">
       <div className="d-sec__head">

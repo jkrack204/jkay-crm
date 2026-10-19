@@ -7,6 +7,9 @@ import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
+import { mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import type { FastifyInstance } from 'fastify';
 import { and, eq } from 'drizzle-orm';
 import { migrate } from 'drizzle-orm/postgres-js/migrator';
@@ -33,6 +36,20 @@ async function call(who: Who | null, method: string, path: string, body?: unknow
   });
   return { status: res.statusCode, body: res.json() as any, headers: res.headers };
 }
+/** Multipart upload of one file, the way the browser sends it. */
+async function upload(who: Who, leadId: string, kind: string, fileName: string, content = 'file-bytes') {
+  const b = '----jkaytest' + Math.random().toString(16).slice(2);
+  const payload = Buffer.from(
+    `--${b}\r\nContent-Disposition: form-data; name="file"; filename="${fileName}"\r\nContent-Type: application/octet-stream\r\n\r\n${content}\r\n--${b}--\r\n`,
+  );
+  const res = await app.inject({
+    method: 'POST',
+    url: `/api/files?leadId=${leadId}&kind=${kind}`,
+    payload,
+    headers: { cookie: who.cookie, 'content-type': `multipart/form-data; boundary=${b}` },
+  });
+  return { status: res.statusCode, body: res.json() as any };
+}
 async function login(username: string, password: string) {
   const r = await call(null, 'POST', '/api/auth/login', { username, password });
   assert.equal(r.status, 200, `login ${username}: ${JSON.stringify(r.body)}`);
@@ -49,7 +66,16 @@ before(async () => {
     env: { ...process.env, DATABASE_URL: url, SEED_ADMIN_USERNAME: 'boss', SEED_ADMIN_PASSWORD: 'bosspass1', SEED_ADMIN_NAME: 'The Boss', SEED_ADMIN_EMAIL: 'boss@example.com' },
     stdio: 'pipe',
   });
-  const env = { DATABASE_URL: url, PORT: 0, SECRETS_KEY: 'x'.repeat(44), COOKIE_SECURE: false, BUCKET_REGION: 'us-east-1', EMAIL_FROM: 'x' } as Env;
+  const env = {
+    DATABASE_URL: url,
+    PORT: 0,
+    SECRETS_KEY: 'x'.repeat(44),
+    COOKIE_SECURE: false,
+    BUCKET_REGION: 'us-east-1',
+    BUCKET_PATH_STYLE: false,
+    STORAGE_LOCAL_DIR: mkdtempSync(join(tmpdir(), 'jkay-files-')),
+    EMAIL_FROM: 'x',
+  } as Env;
   app = await buildApp(env, db, { logger: false, serveWeb: false });
 });
 after(async () => {
@@ -271,4 +297,148 @@ test('changing your password signs out your other sessions', async () => {
   assert.equal(r.status, 200);
   assert.equal((await call(second, 'GET', '/api/auth/me')).status, 401);
   assert.equal((await call(people.priya!, 'GET', '/api/auth/me')).status, 200);
+});
+
+/* ================================ BD desk ================================ */
+test('CRE adds a site photo; the BDE sees it after hand-off', async () => {
+  const id = leadIds[3]!;
+  assert.equal((await call(people.priya!, 'POST', `/api/cre/leads/${id}/claim`)).status, 200);
+  const bad = await upload(people.priya!, id, 'photo', 'virus.exe');
+  assert.equal(bad.status, 400, 'only image types for photos');
+  const notMine = await upload(people.sana!, id, 'photo', 'site.jpg');
+  assert.equal(notMine.status, 403, 'BDE cannot add photos to a CRE lead');
+  const up = await upload(people.priya!, id, 'photo', 'site floor.jpg', 'jpeg-bytes');
+  assert.equal(up.status, 200, JSON.stringify(up.body));
+  const cad = await upload(people.priya!, id, 'cad', 'plan.dwg');
+  assert.equal(cad.status, 403, 'CREs upload photos only');
+  const d = await call(people.priya!, 'GET', `/api/leads/${id}`);
+  assert.equal(d.body.photos.length, 1);
+  await call(people.priya!, 'POST', `/api/cre/leads/${id}/handoff`, { toBdeId: people.sana!.id, note: 'Photos attached' });
+  const deal = await call(people.sana!, 'GET', `/api/bd/deals/${id}`);
+  assert.equal(deal.status, 200, JSON.stringify(deal.body));
+  assert.equal(deal.body.photos.length, 1);
+  const file = await app.inject({ method: 'GET', url: `/api/files/${up.body.attachment.id}`, headers: { cookie: people.sana!.cookie } });
+  assert.equal(file.statusCode, 200);
+  assert.equal(file.body, 'jpeg-bytes');
+});
+
+test('BD: deals are private to their BDE', async () => {
+  const r = await call(people.admin!, 'POST', '/api/employees', { username: 'ravi', password: 'password123', fullName: 'Ravi Bhosale', role: 'bde', email: 'ravi@example.com' });
+  assert.equal(r.status, 200);
+  people.ravi = await login('ravi', 'password123');
+  const mine = await call(people.sana!, 'GET', '/api/bd/deals');
+  assert.equal(mine.body.deals.length, 2);
+  assert.equal((await call(people.ravi, 'GET', '/api/bd/deals')).body.deals.length, 0);
+  assert.equal((await call(people.ravi, 'GET', `/api/bd/deals/${leadIds[0]}`)).status, 403);
+  assert.equal((await call(people.ravi, 'POST', `/api/bd/deals/${leadIds[0]}/call`, { summary: 'x' })).status, 403);
+  assert.equal((await call(people.priya!, 'GET', '/api/bd/deals')).status, 403, 'CREs have no BD desk');
+  const all = await call(people.admin!, 'GET', '/api/bd/deals');
+  assert.equal(all.body.deals.length, 2, 'Admin sees every BD deal');
+});
+
+test('BD: visit → measured → CAD → quotation moves the stage forward', async () => {
+  const id = leadIds[0]!;
+  const early = await call(people.sana!, 'POST', `/api/bd/deals/${id}/stage`, { stageId: stage('bd', 'Quotation sent').id });
+  assert.equal(early.status, 400, 'needs a quotation first');
+
+  const v = await call(people.sana!, 'POST', `/api/bd/deals/${id}/visits`, { scheduledAt: soon(30), engineerName: 'Faisal Sheikh', note: 'Rear dock' });
+  assert.equal(v.status, 200, JSON.stringify(v.body));
+  assert.equal(v.body.bd.visits[0].engineer, 'Faisal Sheikh');
+  const moved = await call(people.sana!, 'POST', `/api/bd/deals/${id}/visits`, { scheduledAt: soon(50) });
+  assert.equal(moved.body.bd.visits.length, 1, 'booking again reschedules the open visit');
+  assert.equal(moved.body.bd.visits[0].engineer, 'Sana Kapoor', 'defaults to the BDE');
+  const creNotif = await sql`select title from notifications where recipient_id = ${people.priya!.id} and kind = 'visit'`;
+  assert.ok(creNotif.length >= 1, 'the CRE who handed it over hears about the visit');
+
+  const done = await call(people.sana!, 'POST', `/api/bd/deals/${id}/visits/${moved.body.bd.visits[0].id}`, { status: 'done' });
+  assert.equal(done.body.lead.bdStage.name, 'Plan layout needed');
+
+  const f = await upload(people.sana!, id, 'cad', 'layout rev1.dwg');
+  assert.equal(f.status, 200, JSON.stringify(f.body));
+  const cad = await call(people.sana!, 'POST', `/api/bd/deals/${id}/cad`, { attachmentId: f.body.attachment.id, note: 'First pass' });
+  assert.equal(cad.status, 200, JSON.stringify(cad.body));
+  assert.equal(cad.body.bd.cad[0].rev, 1);
+  const again = await call(people.sana!, 'POST', `/api/bd/deals/${id}/cad`, { attachmentId: f.body.attachment.id });
+  assert.equal(again.status, 409, 'one file, one revision');
+  const creFile = await app.inject({ method: 'GET', url: `/api/files/${f.body.attachment.id}`, headers: { cookie: people.priya!.cookie } });
+  assert.equal(creFile.statusCode, 403, 'CRE cannot open BD drawings');
+
+  const qf = await upload(people.sana!, id, 'quotation', 'quote-v1.pdf');
+  const q1 = await call(people.sana!, 'POST', `/api/bd/deals/${id}/quotations`, { amount: 300000, attachmentId: qf.body.attachment.id });
+  assert.equal(q1.status, 200, JSON.stringify(q1.body));
+  assert.equal(q1.body.lead.bdStage.name, 'Quotation sent');
+  assert.equal(q1.body.bd.value, 300000);
+  const creView = await call(people.priya!, 'GET', `/api/leads/${id}`);
+  assert.equal(creView.body.bd, undefined);
+  assert.ok(!creView.body.activity.some((a: any) => a.kind === 'quotation'), 'CRE sees no BD activity');
+});
+
+test('BD: a cut past the discount limit needs Admin approval', async () => {
+  const id = leadIds[0]!;
+  const small = await call(people.sana!, 'POST', `/api/bd/deals/${id}/quotations`, { amount: 285000, note: '5% off' });
+  assert.equal(small.status, 200, 'within the 8% limit');
+  const deep = await call(people.sana!, 'POST', `/api/bd/deals/${id}/quotations`, { amount: 270000 });
+  assert.equal(deep.status, 400);
+  assert.match(deep.body.error, /Request Admin approval/);
+  assert.equal((await call(people.sana!, 'POST', `/api/bd/deals/${id}/discounts`, { percent: 5, reason: 'x' })).status, 400, 'no approval needed under the limit');
+  const ask = await call(people.sana!, 'POST', `/api/bd/deals/${id}/discounts`, { percent: 10, reason: 'Competitor at 2.7L' });
+  assert.equal(ask.status, 200, JSON.stringify(ask.body));
+  assert.equal((await call(people.sana!, 'POST', `/api/bd/deals/${id}/discounts`, { percent: 12, reason: 'x' })).status, 409, 'one pending at a time');
+  assert.equal((await call(people.sana!, 'GET', '/api/bd/discounts')).status, 403, 'only Admin decides');
+  const list = await call(people.admin!, 'GET', '/api/bd/discounts');
+  assert.equal(list.body.requests.length, 1);
+  assert.equal(list.body.requests[0].proposedAmount, 270000);
+  const dec = await call(people.admin!, 'POST', `/api/bd/discounts/${list.body.requests[0].id}/decide`, { approve: true, note: 'OK this once' });
+  assert.equal(dec.status, 200);
+  const twice = await call(people.admin!, 'POST', `/api/bd/discounts/${list.body.requests[0].id}/decide`, { approve: false });
+  assert.equal(twice.status, 409);
+  const now = await call(people.sana!, 'POST', `/api/bd/deals/${id}/quotations`, { amount: 270000 });
+  assert.equal(now.status, 200, JSON.stringify(now.body));
+  assert.equal(now.body.bd.quotations[0].version, 3);
+});
+
+test('BD: advance marks the deal won; payments keep the balance honest', async () => {
+  const id = leadIds[0]!;
+  const inst = await call(people.sana!, 'POST', `/api/bd/deals/${id}/payments`, { kind: 'installment', amount: 50000, receivedOn: '2026-10-10', mode: 'NEFT' });
+  assert.equal(inst.status, 400, 'advance comes first');
+  const adv = await call(people.sana!, 'POST', `/api/bd/deals/${id}/payments`, { kind: 'advance', amount: 100000, receivedOn: '2026-10-10', mode: 'RTGS', reference: 'UTR123' });
+  assert.equal(adv.status, 200, JSON.stringify(adv.body));
+  assert.equal(adv.body.lead.bdStage.kind, 'won');
+  assert.equal(adv.body.bd.contractValue, 270000);
+  assert.equal(adv.body.bd.balance, 170000);
+  const over = await call(people.sana!, 'POST', `/api/bd/deals/${id}/payments`, { kind: 'final', amount: 200000, receivedOn: '2026-10-11', mode: 'UPI' });
+  assert.equal(over.status, 400);
+  assert.equal((await call(people.sana!, 'POST', `/api/bd/deals/${id}/quotations`, { amount: 260000 })).status, 400, 'no new quotations once won');
+  assert.equal((await call(people.sana!, 'POST', `/api/bd/deals/${id}/lost`, { reasonId: tag('bd_lost', 'Requirement dropped').id })).status, 400, 'paid deals cannot be lost');
+  assert.equal((await call(people.sana!, 'POST', `/api/bd/deals/${id}/stage`, { stageId: stage('bd', 'Negotiation').id })).status, 400, 'paid deals stay won');
+  const pd = await call(people.sana!, 'PUT', `/api/bd/deals/${id}/production-date`, { productionDate: '2026-11-02' });
+  assert.equal(pd.body.bd.productionDate, '2026-11-02');
+  const fin = await call(people.sana!, 'POST', `/api/bd/deals/${id}/payments`, { kind: 'final', amount: 170000, receivedOn: '2026-10-12', mode: 'NEFT' });
+  assert.equal(fin.body.bd.balance, 0);
+  const ledger = await call(people.sana!, 'GET', '/api/bd/payments');
+  assert.equal(ledger.body.deals[0].payments.length, 2);
+  const adminNotes = await sql`select title from notifications where recipient_id = ${people.admin!.id}`;
+  assert.ok(adminNotes.some((n: any) => n.title.includes(' won')));
+  assert.ok(adminNotes.some((n: any) => n.title.includes('fully paid')));
+});
+
+test('BD: lost needs a BD reason; reopen puts it back', async () => {
+  const id = leadIds[3]!;
+  const wrong = await call(people.sana!, 'POST', `/api/bd/deals/${id}/lost`, { reasonId: tag('cre_lost', 'Other state').id });
+  assert.equal(wrong.status, 400);
+  const ok = await call(people.sana!, 'POST', `/api/bd/deals/${id}/lost`, { reasonId: tag('bd_lost', 'Site not feasible').id, note: 'No floor load' });
+  assert.equal(ok.status, 200);
+  assert.equal(ok.body.lead.lost.reason, 'Site not feasible');
+  assert.equal((await call(people.sana!, 'POST', `/api/bd/deals/${id}/visits`, { scheduledAt: soon() })).status, 400, 'lost deals are frozen');
+  const creNotif = await sql`select title from notifications where recipient_id = ${people.priya!.id} and kind = 'lost'`;
+  assert.equal(creNotif.length, 1, 'the CRE hears it was lost');
+  const re = await call(people.sana!, 'POST', `/api/bd/deals/${id}/reopen`);
+  assert.equal(re.status, 200);
+  assert.equal(re.body.lead.lost, null);
+  assert.equal(re.body.lead.bdStage.name, 'Site measurement');
+  const tagged = await call(people.sana!, 'POST', `/api/bd/deals/${id}/tags`, { tagId: tag('bd', 'Price pressure').id });
+  assert.equal(tagged.body.tags.length, 1);
+  assert.equal((await call(people.sana!, 'POST', `/api/bd/deals/${id}/tags`, { tagId: tag('cre', 'Decision maker').id })).status, 400);
+  const visits = await call(people.sana!, 'GET', '/api/bd/visits');
+  assert.equal(visits.status, 200);
 });

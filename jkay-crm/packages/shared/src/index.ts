@@ -185,6 +185,44 @@ export const transferInput = z.object({
 export const lostInput = z.object({ reasonId: z.number().int(), note: optText });
 export const claimManyInput = z.object({ leadIds: z.array(z.string().uuid()).min(1).max(100) });
 
+/* -------------------------------- BD desk -------------------------------- */
+export const BD_SCOPES = ['open', 'won', 'lost', 'all'] as const;
+export type BdScope = (typeof BD_SCOPES)[number];
+const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Use YYYY-MM-DD');
+const rupeesIn = z.number().int().positive().max(1_000_000_000);
+
+export const bdStageInput = z.object({ stageId: z.number().int() });
+export const bdCallInput = z.object({ to: z.enum(['client', 'cre']).default('client'), summary: z.string().trim().min(1).max(4000) });
+export const visitInput = z.object({
+  scheduledAt: isoDateTime,
+  /** A BDE login, or a free-text name for a measurement engineer without a login. */
+  engineerId: z.string().uuid().optional(),
+  engineerName: z.string().trim().max(200).optional(),
+  note: optText,
+});
+/** Files are uploaded first (POST /api/files) and referenced here by attachment id. */
+export const cadInput = z.object({ attachmentId: z.number().int(), note: optText });
+export const quotationInput = z.object({ amount: rupeesIn, attachmentId: z.number().int().optional(), note: optText });
+export const paymentInput = z.object({
+  kind: z.enum(PAYMENT_KINDS),
+  amount: rupeesIn,
+  receivedOn: isoDate,
+  mode: z.enum(PAYMENT_MODES),
+  reference: z.string().trim().max(200).optional(),
+});
+export const discountInput = z.object({ percent: z.number().positive().max(100), reason: z.string().trim().min(1).max(2000) });
+export const discountDecisionInput = z.object({ approve: z.boolean(), note: optText });
+export const productionDateInput = z.object({ productionDate: isoDate.nullable() });
+
+/** Upload limits, checked in the browser and again on the server. */
+export const UPLOAD_MAX_BYTES = 25 * 1024 * 1024;
+export const UPLOAD_ACCEPT: Record<AttachmentKind, string[]> = {
+  photo: ['.jpg', '.jpeg', '.png', '.webp', '.heic'],
+  cad: ['.dwg', '.dxf', '.pdf', '.jpg', '.jpeg', '.png'],
+  quotation: ['.pdf', '.xlsx', '.xls', '.docx', '.doc', '.jpg', '.jpeg', '.png'],
+  other: ['.pdf', '.jpg', '.jpeg', '.png', '.xlsx', '.docx'],
+};
+
 export const CRE_SCOPES = ['pool', 'mine', 'bd', 'lost'] as const;
 export type CreScope = (typeof CRE_SCOPES)[number];
 

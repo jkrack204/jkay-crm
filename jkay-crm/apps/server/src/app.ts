@@ -18,6 +18,9 @@ import { configRoutes } from './routes/config.js';
 import { leadRoutes } from './routes/leads.js';
 import { creRoutes } from './routes/cre.js';
 import { notificationRoutes } from './routes/notifications.js';
+import { bdRoutes } from './routes/bd.js';
+import { fileRoutes, UPLOAD_LIMITS } from './routes/files.js';
+import fastifyMultipart from '@fastify/multipart';
 
 declare module 'fastify' {
   interface FastifyInstance {
@@ -39,6 +42,7 @@ export async function buildApp(env: Env, db: DB, opts: { logger?: boolean; serve
   app.decorateRequest('user', null);
 
   await app.register(fastifyCookie);
+  await app.register(fastifyMultipart, { limits: UPLOAD_LIMITS });
 
   app.addHook('onRequest', async (req) => {
     if (req.url.startsWith('/api/')) req.user = await loadSessionUser(db, req);
@@ -63,6 +67,8 @@ export async function buildApp(env: Env, db: DB, opts: { logger?: boolean; serve
   await app.register(leadRoutes, { prefix: '/api/leads' });
   await app.register(creRoutes, { prefix: '/api/cre' });
   await app.register(notificationRoutes, { prefix: '/api/notifications' });
+  await app.register(bdRoutes, { prefix: '/api/bd' });
+  await app.register(fileRoutes, { prefix: '/api/files' });
 
   const webDist = fileURLToPath(new URL('../../web/dist', import.meta.url));
   if (opts.serveWeb !== false && existsSync(webDist)) {

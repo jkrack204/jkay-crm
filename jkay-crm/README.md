@@ -18,8 +18,9 @@ packages/shared Enums, input schemas and phone helpers used by both sides
 ## Run locally
 
 1. Have a Postgres to point at (a local one, or a Railway dev database).
-2. `cp .env.example .env` and fill in `DATABASE_URL` and `SECRETS_KEY`
-   (bucket values can wait until file uploads are built).
+2. `cp .env.example .env` and fill in `DATABASE_URL` and `SECRETS_KEY`.
+   Leave the bucket values empty and keep `STORAGE_LOCAL_DIR=./.uploads` — uploads then go to
+   that folder on your machine instead of the bucket.
 3. `npm install`
 4. `npm run db:migrate` — creates every table.
 5. Create the defaults and the first Admin (choose the password yourself):
@@ -47,6 +48,18 @@ the server. The database is only ever reached over Railway's private network.
 4. App service → **Settings → Networking → Generate Domain** to get the web address.
 5. Postgres service → **Settings → Networking**: the TCP Proxy (public URL) can stay off.
 6. Postgres service → **Backups**: turn on daily backups.
+7. Files (site photos, drawings, quotations): **+ Create → Bucket**. Then in the app service →
+   **Variables**, reference the bucket's own variables (if the bucket is named `files`):
+   - `BUCKET_ENDPOINT` = `${{files.ENDPOINT}}`
+   - `BUCKET_NAME` = `${{files.BUCKET}}`
+   - `BUCKET_ACCESS_KEY_ID` = `${{files.ACCESS_KEY_ID}}`
+   - `BUCKET_SECRET_ACCESS_KEY` = `${{files.SECRET_ACCESS_KEY}}`
+   - `BUCKET_REGION` = `${{files.REGION}}`
+   - only if the bucket's Credentials tab says to use path-style URLs: `BUCKET_PATH_STYLE` = `true`
+
+   Do **not** set `STORAGE_LOCAL_DIR` on Railway — the app's own disk is wiped on every deploy.
+   Files are uploaded through the app and opened through short-lived signed links, so the bucket
+   stays private and downloads come straight from the bucket (free bucket egress).
 
 Every later `git push` redeploys and migrates automatically.
 
@@ -56,7 +69,9 @@ Every later `git push` redeploys and migrates automatically.
 TEST_DATABASE_URL=postgres://...throwaway-db... npm test -w @jkay/server
 ```
 The test wipes that database, rebuilds it and drives the real API (login, permissions, the
-claim race, stage rules, transfers, hand-off, lost, sign-out). Never point it at real data.
+claim race, stage rules, transfers, hand-off, lost, sign-out, file uploads, and the BD desk:
+visits, drawings, quotations, the discount limit, payments, won/lost/reopen). Uploaded files
+go to a temporary folder. Never point it at real data.
 
 ## Schema in one paragraph
 

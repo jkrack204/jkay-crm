@@ -1,6 +1,6 @@
 /**
  * Admin console — ported from "JKAY RACKS - Admin Console new.html".
- * Phase 2 ships Employees + "Add a lead by hand"; the other screens follow in Phase 4.
+ * Phase 2 ships Employees + "Add a lead by hand"; Phase 3 adds Discount approvals; the rest follow in Phase 4.
  */
 import { useState } from 'react';
 import { NavLink, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
@@ -13,6 +13,7 @@ import { initials, phone } from '../../lib/format';
 import type { Employee } from '../../lib/types';
 import { Bell, Modal, ThemeSwitch, useAction, useToast } from '../../components/ui';
 import { AccountSettings } from '../../components/AccountSettings';
+import { DiscountApprovals } from './DiscountApprovals';
 
 const NAV: ({ sec: string } | { to: string; label: string })[] = [
   { sec: 'Analytics' },
@@ -22,6 +23,7 @@ const NAV: ({ sec: string } | { to: string; label: string })[] = [
   { to: '/admin/bd', label: 'BD desk' },
   { sec: 'Pipeline' },
   { to: '/admin/pipeline', label: 'Sales pipeline' },
+  { to: '/admin/discounts', label: 'Discount approvals' },
   { sec: 'Closed' },
   { to: '/admin/closed', label: 'Deal closed' },
   { to: '/admin/payments', label: 'Payments' },
@@ -36,6 +38,7 @@ const TITLES: Record<string, [string, string]> = {
   cre: ['CRE desk', 'Every lead on the CRE side · filter by executive'],
   bd: ['BD desk', 'Every deal handed to BD · filter by BDE'],
   pipeline: ['Sales pipeline', 'Every live lead and deal in your own ranking'],
+  discounts: ['Discount approvals', 'BDE requests past the discount limit · first Admin to decide wins'],
   closed: ['Deal closed', 'Won deals only'],
   payments: ['Payments', 'Received and outstanding on every won deal'],
   lost: ['Lost', 'CRE lost and BD lost, kept apart'],
@@ -102,7 +105,7 @@ export function AdminConsole() {
               <button className="btn btn-signal btn-sm" style={{ whiteSpace: 'nowrap' }} onClick={() => setAddLead(true)}>
                 + Add lead
               </button>
-              <Bell onOpenLead={() => toast('Lead records open from the Admin desks in the next build')} />
+              <Bell onOpenLead={(_id, kind) => (kind === 'discount' ? nav('/admin/discounts') : toast('Lead records open from the Admin desks in the next build'))} />
               <div
                 className="avatar"
                 title="Sign out"
@@ -121,6 +124,7 @@ export function AdminConsole() {
             <div className="wrap">
               <Routes>
                 <Route path="employees" element={<Employees />} />
+                <Route path="discounts" element={<DiscountApprovals />} />
                 <Route path="account" element={<AccountSettings />} />
                 <Route path="*" element={key === 'employees' ? <Employees /> : <Soon what={title} />} />
               </Routes>

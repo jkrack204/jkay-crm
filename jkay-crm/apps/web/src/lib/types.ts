@@ -97,7 +97,69 @@ export type LeadDetail = {
   notes: { id: number; text: string; color: string; pinned: boolean; scope: string; author: string; mine: boolean; createdAt: string }[];
   activity: { id: number; kind: string; title: string; body: string | null; by: string; at: string }[];
   owners: { owner: string; desk: Desk; reason: string; by: string; note: string | null; from: string; to: string | null }[];
+  photos: { id: number; fileName: string; by: string; mine: boolean; at: string }[];
 };
+
+/* --------------------------------- BD desk -------------------------------- */
+export type BdStageRef = { id: number; name: string; kind: StageKind; position: number; showsValue: boolean };
+export type DealRow = {
+  id: string;
+  number: number;
+  customerName: string;
+  contactName: string | null;
+  phone: string | null;
+  place: string | null;
+  requirement: string | null;
+  category: string | null;
+  platform: Platform;
+  sourceLabel: string | null;
+  stage: BdStageRef | null;
+  owner: { id: string; name: string } | null;
+  handedBy: string;
+  handedAt: string | null;
+  estimate: number | null;
+  tags: MiniTag[];
+  quoteCount: number;
+  latestQuote: { version: number; amount: number; at: string } | null;
+  value: number | null;
+  contractValue: number | null;
+  paid: number;
+  balance: number | null;
+  cad: { rev: number; at: string } | null;
+  visit: { id: number; scheduledAt: string; status: string; engineer: string } | null;
+  discountPending: boolean;
+  wonAt: string | null;
+  productionDate: string | null;
+  lostAt: string | null;
+  lostReason: string | null;
+  updatedAt: string;
+};
+export type BdBlock = {
+  handedBy: { id: string; name: string; phone: string | null } | null;
+  value: number | null;
+  contractValue: number | null;
+  paid: number;
+  balance: number | null;
+  productionDate: string | null;
+  discountThreshold: number;
+  visits: { id: number; scheduledAt: string; engineer: string; engineerId: string | null; note: string | null; status: 'booked' | 'done' | 'cancelled'; doneAt: string | null }[];
+  cad: { id: number; rev: number; attachmentId: number; fileName: string; note: string | null; by: string; at: string }[];
+  quotations: { id: number; version: number; amount: number; attachmentId: number | null; fileName: string | null; note: string | null; by: string; at: string }[];
+  payments: { id: number; kind: 'advance' | 'installment' | 'final'; amount: number; receivedOn: string; mode: string; reference: string | null; by: string }[];
+  discounts: {
+    id: number;
+    percent: number;
+    proposedAmount: number | null;
+    reason: string | null;
+    status: 'pending' | 'approved' | 'rejected';
+    by: string;
+    decidedBy: string | null;
+    decidedAt: string | null;
+    decisionNote: string | null;
+    at: string;
+  }[];
+};
+export type DealDetail = LeadDetail & { bd: BdBlock };
 
 export type Notification = {
   id: number;
