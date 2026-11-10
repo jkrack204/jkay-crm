@@ -3,10 +3,11 @@
  * "Add a lead by hand".
  */
 import type { FastifyPluginAsync } from 'fastify';
-import { and, asc, desc, eq, isNull, ne, or } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, isNull, ne, or } from 'drizzle-orm';
 import { createLeadInput, normalizePhone, noteInput, noteUpdateInput, NOTE_COLORS, PLATFORM_LABEL, type NoteScope } from '@jkay/shared';
 import {
   activities,
+  adminLeadTags,
   attachments,
   categories,
   followups,
@@ -236,6 +237,10 @@ export const leadRoutes: FastifyPluginAsync = async (app) => {
       }
 
       if (input.note) await tx.insert(notes).values({ leadId: l.id, authorId: admin.id, scope: 'admin', text: input.note, pinned: true });
+      if (input.adminTagIds?.length) {
+        const ok = await tx.select({ id: tags.id }).from(tags).where(and(inArray(tags.id, input.adminTagIds), eq(tags.scope, 'admin'), isNull(tags.archivedAt)));
+        if (ok.length) await tx.insert(adminLeadTags).values(ok.map((t) => ({ adminId: admin.id, leadId: l.id, tagId: t.id }))).onConflictDoNothing();
+      }
       return l.id;
     });
     const l = await getLead(app.db, id);

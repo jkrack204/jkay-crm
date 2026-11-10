@@ -1,19 +1,28 @@
 /**
  * Admin console — ported from "JKAY RACKS - Admin Console new.html".
- * Phase 2 ships Employees + "Add a lead by hand"; Phase 3 adds Discount approvals; the rest follow in Phase 4.
+ * Dashboard, both desks, the sales pipeline (each Admin's own ranking, tags, notes
+ * and watches), closed / payments / lost, discount approvals, employees and settings.
+ * Any record opens as a sheet over the current screen (?rec=<id>).
  */
-import { useState } from 'react';
-import { NavLink, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
+import { useEffect, useState } from 'react';
+import { NavLink, Navigate, Route, Routes, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { PLATFORMS, PLATFORM_LABEL, ROLES, type Role } from '@jkay/shared';
 import { api } from '../../lib/api';
 import { Logo } from '../../components/Logo';
 import { logout, useConfig, useMe } from '../../lib/session';
-import { initials, phone } from '../../lib/format';
+import { initials, money, phone } from '../../lib/format';
 import type { Employee } from '../../lib/types';
-import { Bell, Modal, ThemeSwitch, useAction, useToast } from '../../components/ui';
+import { Bell, Modal, ThemeSwitch, useAction } from '../../components/ui';
 import { AccountSettings } from '../../components/AccountSettings';
 import { DiscountApprovals } from './DiscountApprovals';
+import { AdminDashboard } from './AdminDashboard';
+import { AdminBdDesk, AdminCreDesk } from './AdminDesks';
+import { AdminPipeline } from './AdminPipeline';
+import { AdminClosed, AdminLost, AdminPayments } from './AdminClosed';
+import { AdminSettings } from './AdminSettings';
+import { RecordSheet } from './RecordSheet';
+import { adminInvalidate, stageName, tonePill, useRecords } from './adminShared';
 
 const NAV: ({ sec: string } | { to: string; label: string })[] = [
   { sec: 'Analytics' },
@@ -37,13 +46,13 @@ const TITLES: Record<string, [string, string]> = {
   dashboard: ['Dashboard', 'Where leads come from, how each person performs, and where deals fall out'],
   cre: ['CRE desk', 'Every lead on the CRE side · filter by executive'],
   bd: ['BD desk', 'Every deal handed to BD · filter by BDE'],
-  pipeline: ['Sales pipeline', 'Every live lead and deal in your own ranking'],
+  pipeline: ['Sales pipeline', 'Every live lead and deal — CRE side and BD side — in your own ranking'],
   discounts: ['Discount approvals', 'BDE requests past the discount limit · first Admin to decide wins'],
   closed: ['Deal closed', 'Won deals only'],
   payments: ['Payments', 'Received and outstanding on every won deal'],
   lost: ['Lost', 'CRE lost and BD lost, kept apart'],
   employees: ['Employees', 'Who can log in, and to which desk'],
-  settings: ['Settings', 'Integrations, tags and the stage definitions every desk follows'],
+  settings: ['Settings', 'Stages, tags, rules and templates every desk follows'],
   account: ['My account', 'Your password and signed-in devices'],
 };
 
@@ -52,11 +61,16 @@ export function AdminConsole() {
   const qc = useQueryClient();
   const nav = useNavigate();
   const loc = useLocation();
-  const toast = useToast();
+  const [params, setParams] = useSearchParams();
   const [navOpen, setNavOpen] = useState(false);
   const [addLead, setAddLead] = useState(false);
-  const key = loc.pathname.replace(/^\/admin\/?/, '').split('/')[0] || 'employees';
-  const [title, crumb] = TITLES[key] ?? TITLES.employees!;
+  const [q, setQ] = useState('');
+  const key = loc.pathname.replace(/^\/admin\/?/, '').split('/')[0] || 'dashboard';
+  const [title, crumb] = TITLES[key] ?? TITLES.dashboard!;
+  const rec = params.get('rec');
+  const openRecord = (id: string) => setParams((p) => (p.set('rec', id), p));
+  const closeRecord = () => setParams((p) => (p.delete('rec'), p));
+  useEffect(() => setNavOpen(false), [loc.pathname]);
 
   return (
     <div className="desk-admin">
@@ -75,7 +89,7 @@ export function AdminConsole() {
                   {n.sec}
                 </div>
               ) : (
-                <NavLink key={n.to} to={n.to} className={({ isActive }) => `nav-item ${isActive || (key === 'employees' && n.to === '/admin/employees') ? 'active' : ''}`} onClick={() => setNavOpen(false)}>
+                <NavLink key={n.to} to={n.to} className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
                   <span className="dot"></span>
                   {n.label}
                 </NavLink>
@@ -102,10 +116,14 @@ export function AdminConsole() {
               </div>
             </div>
             <div className="topbar__right">
+              <div className="search-box">
+                <span style={{ color: 'var(--steel-500)' }}>⌕</span>
+                <input type="text" placeholder="Search customer, phone, place…" value={q} onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => e.key === 'Escape' && setQ('')} />
+              </div>
               <button className="btn btn-signal btn-sm" style={{ whiteSpace: 'nowrap' }} onClick={() => setAddLead(true)}>
                 + Add lead
               </button>
-              <Bell onOpenLead={(_id, kind) => (kind === 'discount' ? nav('/admin/discounts') : toast('Lead records open from the Admin desks in the next build'))} />
+              <Bell onOpenLead={(id, kind) => (kind === 'discount' ? nav('/admin/discounts') : openRecord(id))} footer="Watched records, wins, full payments and discount requests arrive here." />
               <div
                 className="avatar"
                 title="Sign out"
@@ -122,26 +140,64 @@ export function AdminConsole() {
 
           <div className="content">
             <div className="wrap">
+              {q.trim().length >= 2 && <SearchPanel q={q.trim()} onOpen={(id) => (openRecord(id), setQ(''))} />}
               <Routes>
-                <Route path="employees" element={<Employees />} />
+                <Route path="dashboard" element={<AdminDashboard />} />
+                <Route path="cre" element={<AdminCreDesk />} />
+                <Route path="bd" element={<AdminBdDesk />} />
+                <Route path="pipeline" element={<AdminPipeline />} />
                 <Route path="discounts" element={<DiscountApprovals />} />
+                <Route path="closed" element={<AdminClosed />} />
+                <Route path="payments" element={<AdminPayments />} />
+                <Route path="lost" element={<AdminLost />} />
+                <Route path="employees" element={<Employees />} />
+                <Route path="settings" element={<AdminSettings />} />
                 <Route path="account" element={<AccountSettings />} />
-                <Route path="*" element={key === 'employees' ? <Employees /> : <Soon what={title} />} />
+                <Route path="*" element={<Navigate to="/admin/dashboard" replace />} />
               </Routes>
             </div>
           </div>
         </div>
       </div>
-      {addLead && <AddLeadModal onClose={() => setAddLead(false)} />}
+      <RecordSheet id={rec} onClose={closeRecord} />
+      {addLead && <AddLeadModal onClose={() => setAddLead(false)} onAdded={openRecord} />}
     </div>
   );
 }
 
-function Soon({ what }: { what: string }) {
+function SearchPanel({ q, onOpen }: { q: string; onOpen: (id: string) => void }) {
+  const [debounced, setDebounced] = useState(q);
+  useEffect(() => {
+    const t = setTimeout(() => setDebounced(q), 250);
+    return () => clearTimeout(t);
+  }, [q]);
+  const res = useRecords('search', { q: debounced });
+  const hits = res.data?.records ?? [];
   return (
-    <div className="soon">
-      <b>{what} — in a later build</b>
-      This screen is part of the Admin console build (Phase 4). Employees and “Add lead” work now.
+    <div className="panel srch-panel">
+      <div className="panel__head">
+        <h3>Search</h3>
+        <span className="count">{res.isFetching ? 'searching…' : `${hits.length} match${hits.length === 1 ? '' : 'es'}`}</span>
+      </div>
+      <div className="panel__body" style={{ paddingTop: 4 }}>
+        {hits.map((r) => (
+          <div key={r.id} className="sr" style={{ cursor: 'pointer' }} onClick={() => onOpen(r.id)}>
+            <div>
+              <span className="lbl2">{r.customerName}</span>
+              <div className="k">
+                {phone(r.phone)} · {r.place ?? '—'} · {PLATFORM_LABEL[r.platform]} · #{r.number}
+              </div>
+            </div>
+            <div style={{ textAlign: 'right' }}>
+              <div className="k">
+                {r.lost ? `Lost · ${r.lost.reason}` : stageName(r)} · {r.owner?.name ?? 'unclaimed'}
+              </div>
+              <div className="k">{r.value ?? r.estimate ? money(r.value ?? r.estimate) : ''}</div>
+            </div>
+          </div>
+        ))}
+        {!res.isFetching && !hits.length && <div className="empty">No matches</div>}
+      </div>
     </div>
   );
 }
@@ -357,8 +413,10 @@ function ResetPasswordModal({ emp, onClose }: { emp: Employee; onClose: () => vo
 }
 
 /* ------------------------------ add a lead -------------------------------- */
-function AddLeadModal({ onClose }: { onClose: () => void }) {
+function AddLeadModal({ onClose, onAdded }: { onClose: () => void; onAdded: (id: string) => void }) {
   const { data: config } = useConfig();
+  const [adminTagIds, setAdminTagIds] = useState<number[]>([]);
+  const adminTags = (config?.tags ?? []).filter((t) => t.scope === 'admin');
   const emp = useQuery({ queryKey: ['employees'], queryFn: () => api.get<{ employees: Employee[] }>('/employees') });
   const [f, setF] = useState({ customerName: '', phone: '', place: '', platform: 'walkin', estimate: '', requirement: '', route: 'pool' as 'pool' | 'cre' | 'bd', ownerId: '', stageId: '', note: '' });
   const set = (k: keyof typeof f, v: string) => setF({ ...f, [k]: v });
@@ -377,8 +435,9 @@ function AddLeadModal({ onClose }: { onClose: () => void }) {
         route: f.route,
         ...(f.route !== 'pool' ? { ownerId: owner, stageId: f.stageId ? Number(f.stageId) : undefined } : {}),
         note: f.note || undefined,
+        adminTagIds,
       }),
-    { ok: `${f.customerName} added${f.route === 'pool' ? ' to the unclaimed pool' : ''}`, invalidate: [['cre'], ['notifications']] },
+    { ok: `${f.customerName} added${f.route === 'pool' ? ' to the unclaimed pool' : ''}`, invalidate: [['cre'], ...adminInvalidate] },
   );
   const hint =
     f.route === 'pool'
@@ -396,7 +455,19 @@ function AddLeadModal({ onClose }: { onClose: () => void }) {
           <button className="btn btn-outline" onClick={onClose}>
             Cancel
           </button>
-          <button className="btn btn-signal" disabled={!f.customerName.trim() || (f.route !== 'pool' && !owner) || save.isPending} onClick={() => save.mutate(undefined, { onSuccess: onClose })}>
+          <button
+            className="btn btn-signal"
+            disabled={!f.customerName.trim() || (f.route !== 'pool' && !owner) || save.isPending}
+            onClick={() =>
+              save.mutate(undefined, {
+                onSuccess: (out) => {
+                  onClose();
+                  const id = (out as { lead?: { id: string } }).lead?.id;
+                  if (id) onAdded(id);
+                },
+              })
+            }
+          >
             Add lead
           </button>
         </>
@@ -481,6 +552,26 @@ function AddLeadModal({ onClose }: { onClose: () => void }) {
         <label>Admin note (optional — private to you)</label>
         <textarea rows={2} value={f.note} onChange={(e) => set('note', e.target.value)} placeholder="Anything you want on record." />
       </div>
+      {adminTags.length > 0 && (
+        <div className="field">
+          <label>Admin tag (optional — private to you)</label>
+          <div className="tagpick" style={{ marginTop: 0 }}>
+            {adminTags.map((t) => {
+              const on = adminTagIds.includes(t.id);
+              return (
+                <button
+                  key={t.id}
+                  style={on ? { background: 'var(--accent-tint)', color: 'var(--accent-hover)', borderColor: 'var(--signal-amber-dim)' } : undefined}
+                  onClick={() => setAdminTagIds(on ? adminTagIds.filter((x) => x !== t.id) : [...adminTagIds, t.id])}
+                >
+                  {on ? '✓ ' : '+ '}
+                  {t.name}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
       <div style={{ fontSize: 12, color: 'var(--text-muted)', lineHeight: 1.55 }}>{hint}</div>
     </Modal>
   );

@@ -19,6 +19,7 @@ import { leadRoutes } from './routes/leads.js';
 import { creRoutes } from './routes/cre.js';
 import { notificationRoutes } from './routes/notifications.js';
 import { bdRoutes } from './routes/bd.js';
+import { adminRoutes } from './routes/admin.js';
 import { fileRoutes, UPLOAD_LIMITS } from './routes/files.js';
 import fastifyMultipart from '@fastify/multipart';
 
@@ -68,6 +69,7 @@ export async function buildApp(env: Env, db: DB, opts: { logger?: boolean; serve
   await app.register(creRoutes, { prefix: '/api/cre' });
   await app.register(notificationRoutes, { prefix: '/api/notifications' });
   await app.register(bdRoutes, { prefix: '/api/bd' });
+  await app.register(adminRoutes, { prefix: '/api/admin' });
   await app.register(fileRoutes, { prefix: '/api/files' });
 
   const webDist = fileURLToPath(new URL('../../web/dist', import.meta.url));

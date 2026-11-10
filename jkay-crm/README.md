@@ -28,7 +28,7 @@ packages/shared Enums, input schemas and phone helpers used by both sides
    SEED_ADMIN_USERNAME=raneesh SEED_ADMIN_PASSWORD=... SEED_ADMIN_NAME="..." SEED_ADMIN_EMAIL=... npm run db:seed
    ```
    On Windows PowerShell set each with `$env:SEED_ADMIN_USERNAME="raneesh"` etc. first, then `npm run db:seed`.
-6. `npm run dev` — API on :3000, web on http://localhost:5173
+6. Two terminals: `npm run dev:server` (API on :3000) and `npm run dev:web` (open http://localhost:5173)
 
 ## On Railway
 
@@ -70,7 +70,8 @@ TEST_DATABASE_URL=postgres://...throwaway-db... npm test -w @jkay/server
 ```
 The test wipes that database, rebuilds it and drives the real API (login, permissions, the
 claim race, stage rules, transfers, hand-off, lost, sign-out, file uploads, and the BD desk:
-visits, drawings, quotations, the discount limit, payments, won/lost/reopen). Uploaded files
+visits, drawings, quotations, the discount limit, payments, won/lost/reopen, and the Admin side:
+records, privacy between Admins, ranking, reassign, settings). Uploaded files
 go to a temporary folder. Never point it at real data.
 
 ## Schema in one paragraph

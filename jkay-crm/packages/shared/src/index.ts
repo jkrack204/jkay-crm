@@ -147,6 +147,8 @@ export const createLeadInput = z.object({
   ownerId: z.string().uuid().optional(),
   stageId: z.number().int().optional(),
   note: optText,
+  /** The adding Admin's own admin tags. */
+  adminTagIds: z.array(z.number().int()).max(20).optional(),
 });
 export type CreateLeadInput = z.infer<typeof createLeadInput>;
 
@@ -222,6 +224,55 @@ export const UPLOAD_ACCEPT: Record<AttachmentKind, string[]> = {
   quotation: ['.pdf', '.xlsx', '.xls', '.docx', '.doc', '.jpg', '.jpeg', '.png'],
   other: ['.pdf', '.jpg', '.jpeg', '.png', '.xlsx', '.docx'],
 };
+
+/* --------------------------------- Admin --------------------------------- */
+export const ADMIN_SCOPES = ['live', 'cre', 'bd', 'won', 'lost', 'all', 'search'] as const;
+export type AdminScope = (typeof ADMIN_SCOPES)[number];
+export const watchInput = z.object({ on: z.boolean() });
+/** The Admin's full manual pipeline order (their own; other Admins keep theirs). */
+export const rankInput = z.object({ order: z.array(z.string().uuid()).max(5000) });
+export const reassignInput = z.object({ to: z.union([z.literal('pool'), z.string().uuid()]), note: z.string().trim().min(1).max(2000) });
+
+export const stageCreateInput = z.object({
+  desk: z.enum(DESKS),
+  name: z.string().trim().min(1).max(80),
+  definition: z.string().trim().max(500).default(''),
+});
+export const stageUpdateInput = z.object({
+  name: z.string().trim().min(1).max(80).optional(),
+  definition: z.string().trim().max(500).optional(),
+  requiresFollowup: z.boolean().optional(),
+  requiresStageTag: z.boolean().optional(),
+  showsValue: z.boolean().optional(),
+  requiresQuotation: z.boolean().optional(),
+});
+export const stageOrderInput = z.object({ desk: z.enum(DESKS), ids: z.array(z.number().int()).min(1).max(100) });
+export const tagCreateInput = z.object({
+  scope: z.enum(TAG_SCOPES),
+  name: z.string().trim().min(1).max(60),
+  tone: z.enum(TONES).default('neutral'),
+  stageId: z.number().int().optional(),
+});
+export const tagUpdateInput = z.object({ name: z.string().trim().min(1).max(60).optional(), tone: z.enum(TONES).optional() });
+export const categoryInput = z.object({ name: z.string().trim().min(1).max(60) });
+export const templateInput = z.object({
+  desk: z.enum(DESKS),
+  audience: z.enum(['client', 'cre']),
+  title: z.string().trim().min(1).max(80),
+  body: z.string().trim().min(1).max(1000),
+});
+
+/** Settings Admin can change, with their allowed ranges. */
+export const SETTING_RULES = {
+  discount_threshold_pct: { label: 'Discount a BDE can give without approval (%)', min: 0, max: 50 },
+  unclaimed_alert_hours: { label: 'Alert when a pool lead is unclaimed for (hours)', min: 1, max: 168 },
+  idle_alert_days: { label: 'Alert when a lead has no contact for (days)', min: 1, max: 60 },
+  quote_unanswered_days: { label: 'Nudge the BDE when a quotation is unanswered for (days)', min: 1, max: 60 },
+  balance_alert_days_before_production: { label: 'Final-balance alert, days before production', min: 1, max: 30 },
+  cna_escalate_at: { label: 'Escalate to Admin after this many "Call Not Attend" tags', min: 1, max: 10 },
+} as const;
+export type SettingKey = keyof typeof SETTING_RULES;
+export const settingInput = z.object({ key: z.enum(Object.keys(SETTING_RULES) as [SettingKey, ...SettingKey[]]), value: z.number() });
 
 export const CRE_SCOPES = ['pool', 'mine', 'bd', 'lost'] as const;
 export type CreScope = (typeof CRE_SCOPES)[number];

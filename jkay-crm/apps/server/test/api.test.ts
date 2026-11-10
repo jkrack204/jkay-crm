@@ -442,3 +442,117 @@ test('BD: lost needs a BD reason; reopen puts it back', async () => {
   const visits = await call(people.sana!, 'GET', '/api/bd/visits');
   assert.equal(visits.status, 200);
 });
+
+/* ================================= Admin ================================= */
+test('Admin: records cover every scope; search finds by name and phone', async () => {
+  const live = await call(people.admin!, 'GET', '/api/admin/records?scope=live');
+  assert.equal(live.status, 200, JSON.stringify(live.body).slice(0, 400));
+  assert.ok(live.body.records.length >= 2);
+  const won = await call(people.admin!, 'GET', '/api/admin/records?scope=won');
+  assert.equal(won.body.records.length, 1);
+  assert.equal(won.body.records[0].paid, 270000);
+  assert.equal(won.body.records[0].payments.length, 2);
+  assert.equal(won.body.records[0].bde.name, 'Sana Kapoor');
+  assert.equal(won.body.records[0].cre.name, 'Priya R.');
+  const lost = await call(people.admin!, 'GET', '/api/admin/records?scope=lost');
+  assert.equal(lost.body.records[0].lost.desk, 'cre');
+  const s = await call(people.admin!, 'GET', '/api/admin/records?scope=search&q=Sunrise');
+  assert.equal(s.body.records[0].customerName, 'Sunrise Supermart');
+  const byPhone = await call(people.admin!, 'GET', '/api/admin/records?scope=search&q=8765122045');
+  assert.equal(byPhone.body.records.length, 1);
+  assert.equal((await call(people.sana!, 'GET', '/api/admin/records')).status, 403, 'Admin only');
+});
+
+test('Admin: tags, notes, watches and ranking are private to each Admin', async () => {
+  const r = await call(people.admin!, 'POST', '/api/employees', { username: 'boss2', password: 'password123', fullName: 'Second Admin', role: 'admin', email: 'b2@example.com' });
+  assert.equal(r.status, 200);
+  people.admin2 = await login('boss2', 'password123');
+  const id = leadIds[3]!;
+  assert.equal((await call(people.admin!, 'POST', `/api/admin/records/${id}/tags`, { tagId: tag('admin', 'Competitive').id })).status, 200);
+  assert.equal((await call(people.admin!, 'POST', `/api/admin/records/${id}/tags`, { tagId: tag('bd', 'High value').id })).status, 400, 'only admin tags');
+  await call(people.admin!, 'PUT', `/api/admin/records/${id}/watch`, { on: true });
+  await call(people.admin!, 'POST', `/api/leads/${id}/notes`, { text: 'Do not go past 6% without me' });
+  const order = (await call(people.admin!, 'GET', '/api/admin/records?scope=live')).body.records.map((x: any) => x.id);
+  const reversed = [...order].reverse();
+  assert.equal((await call(people.admin!, 'PUT', '/api/admin/rank', { order: reversed })).status, 200);
+
+  const mine = (await call(people.admin!, 'GET', `/api/admin/records/${id}`)).body.record;
+  assert.equal(mine.adminTags[0].name, 'Competitive');
+  assert.equal(mine.watch, true);
+  assert.equal(mine.notes.length, 1);
+  assert.equal(mine.rank, reversed.indexOf(id) + 1);
+
+  const theirs = (await call(people.admin2, 'GET', `/api/admin/records/${id}`)).body.record;
+  assert.equal(theirs.adminTags.length, 0, "another Admin's tags are hidden");
+  assert.equal(theirs.watch, false);
+  assert.equal(theirs.notes.length, 0);
+  assert.equal(theirs.rank, null);
+  const detail2 = await call(people.admin2, 'GET', `/api/leads/${id}`);
+  assert.ok(!detail2.body.notes.some((n: any) => n.text.includes('6%')), "another Admin's note is hidden");
+  const bdView = await call(people.sana!, 'GET', `/api/bd/deals/${id}`);
+  assert.ok(!bdView.body.notes.some((n: any) => n.text.includes('6%')), 'the BDE never sees admin notes');
+
+  // the watch fires on the next move
+  await call(people.sana!, 'POST', `/api/bd/deals/${id}/call`, { summary: 'x' });
+  await call(people.sana!, 'POST', `/api/bd/deals/${id}/stage`, { stageId: stage('bd', 'Plan layout needed').id });
+  const n = await sql`select title from notifications where recipient_id = ${people.admin!.id} and via_watch`;
+  assert.ok(n.length >= 1, 'watching Admin is told');
+  const n2 = await sql`select title from notifications where recipient_id = ${people.admin2.id} and via_watch`;
+  assert.equal(n2.length, 0);
+});
+
+test('Admin: reassign a BD deal to another BDE, and a pool lead to a CRE', async () => {
+  const id = leadIds[3]!;
+  assert.equal((await call(people.admin!, 'POST', `/api/admin/records/${id}/reassign`, { to: people.priya!.id, note: 'x' })).status, 400, 'BD deals go to a BDE');
+  const r = await call(people.admin!, 'POST', `/api/admin/records/${id}/reassign`, { to: people.ravi!.id, note: 'Sana on leave' });
+  assert.equal(r.status, 200, JSON.stringify(r.body));
+  assert.equal((await call(people.sana!, 'GET', `/api/bd/deals/${id}`)).status, 403, 'old BDE loses it');
+  const d = await call(people.ravi!, 'GET', `/api/bd/deals/${id}`);
+  assert.equal(d.status, 200);
+  assert.equal(d.body.owners.at(-1).reason, 'reassign');
+
+  const pool = (await call(people.priya!, 'GET', '/api/cre/leads?scope=pool')).body.leads[0];
+  const a = await call(people.admin!, 'POST', `/api/admin/records/${pool.id}/reassign`, { to: people.priya!.id, note: 'Her territory' });
+  assert.equal(a.status, 200, JSON.stringify(a.body));
+  const mine = await call(people.priya!, 'GET', '/api/cre/leads?scope=mine');
+  assert.ok(mine.body.leads.some((l: any) => l.id === pool.id && l.creStage.kind === 'working'));
+});
+
+test('Admin settings: stages, tags, categories, rules, templates', async () => {
+  const lib = await call(people.admin!, 'GET', '/api/admin/library');
+  assert.equal(lib.status, 200, JSON.stringify(lib.body));
+  const busy = lib.body.stages.find((s: any) => s.kind === 'working' && s.live > 0);
+  assert.ok(busy, 'some working stage holds open records');
+  assert.equal((await call(people.admin!, 'DELETE', `/api/admin/stages/${busy.id}`)).status, 409, 'stage with open records stays');
+  const won = lib.body.stages.find((s: any) => s.desk === 'bd' && s.kind === 'won');
+  assert.equal((await call(people.admin!, 'DELETE', `/api/admin/stages/${won.id}`)).status, 400, 'workflow stages stay');
+
+  assert.equal((await call(people.admin!, 'POST', '/api/admin/stages', { desk: 'bd', name: 'Design review', definition: 'Client checks the layout' })).status, 200);
+  const lib2 = (await call(people.admin!, 'GET', '/api/admin/library')).body;
+  const bd = lib2.stages.filter((s: any) => s.desk === 'bd');
+  const dr = bd.find((s: any) => s.name === 'Design review');
+  assert.ok(dr.position < bd.find((s: any) => s.kind === 'won').position, 'new stage sits before Won');
+  const working = bd.filter((s: any) => s.kind === 'working').map((s: any) => s.id);
+  const reordered = [dr.id, ...working.filter((x: number) => x !== dr.id)];
+  assert.equal((await call(people.admin!, 'POST', '/api/admin/stages/order', { desk: 'bd', ids: reordered })).status, 200);
+  const cfg = (await call(people.sana!, 'GET', '/api/config')).body;
+  const first = cfg.stages.filter((s: any) => s.desk === 'bd' && s.kind === 'working').sort((a: any, b: any) => a.position - b.position)[0];
+  assert.equal(first.name, 'Design review', 'desks see the new order');
+  assert.equal((await call(people.admin!, 'PATCH', `/api/admin/stages/${dr.id}`, { name: 'Design check', showsValue: true })).status, 200);
+  assert.equal((await call(people.admin!, 'DELETE', `/api/admin/stages/${dr.id}`)).status, 200, 'an empty stage can go');
+
+  assert.equal((await call(people.admin!, 'POST', '/api/admin/tags', { scope: 'bd', name: 'Urgent', tone: 'red' })).status, 200);
+  assert.equal((await call(people.admin!, 'POST', '/api/admin/tags', { scope: 'bd', name: 'urgent' })).status, 409);
+  const lostTags = lib.body.tags.filter((t: any) => t.scope === 'bd_lost');
+  for (const t of lostTags.slice(1)) await call(people.admin!, 'DELETE', `/api/admin/tags/${t.id}`);
+  assert.equal((await call(people.admin!, 'DELETE', `/api/admin/tags/${lostTags[0].id}`)).status, 400, 'keep one lost reason');
+
+  assert.equal((await call(people.admin!, 'PUT', '/api/admin/settings', { key: 'discount_threshold_pct', value: 99 })).status, 400);
+  assert.equal((await call(people.admin!, 'PUT', '/api/admin/settings', { key: 'discount_threshold_pct', value: 10 })).status, 200);
+  const lib3 = (await call(people.admin!, 'GET', '/api/admin/library')).body;
+  assert.equal(lib3.settings.find((s: any) => s.key === 'discount_threshold_pct').value, 10);
+
+  assert.equal((await call(people.admin!, 'POST', '/api/admin/categories', { name: 'Cold storage' })).status, 200);
+  assert.equal((await call(people.admin!, 'POST', '/api/admin/templates', { desk: 'cre', audience: 'client', title: 'Hello', body: 'Hi {contact}' })).status, 200);
+  assert.equal((await call(people.sana!, 'POST', '/api/admin/tags', { scope: 'bd', name: 'x' })).status, 403);
+});
