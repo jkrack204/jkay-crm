@@ -38,7 +38,7 @@ export function DiscountApprovals() {
                 </button>
               ))}
             </div>
-            <span className="small muted">BDEs can give up to {q.data?.threshold ?? '…'}% on their own. Change the limit in Settings (coming in the next build).</span>
+            <span className="small muted">BDEs can give up to {q.data?.threshold ?? '…'}% on their own. Change the limit in Settings › Rules &amp; alerts.</span>
           </div>
           {q.isLoading && <div className="dash-empty">Loading…</div>}
           {!q.isLoading && !rows.length && <div className="dash-empty">{status === 'pending' ? 'Nothing waiting on you.' : `No ${status} requests.`}</div>}

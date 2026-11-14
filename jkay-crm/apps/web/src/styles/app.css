@@ -154,3 +154,10 @@ a.btn { text-decoration: none; }
 .desk-admin .sheet-desk-secs .tl-body .t { font-size: 13px; color: var(--text-strong); font-weight: 600; }
 .desk-admin .sheet-desk-secs .tl-body .m { font-size: 12.5px; color: var(--text-muted); margin-top: 1px; line-height: 1.5; }
 .desk-admin .sheet-desk-secs .tl-body .m em { font-style: normal; color: var(--text-secondary); }
+
+/* Admin › Settings › Email & backups */
+.desk-admin .sys-rows { display: grid; gap: 10px; font-size: 13px; color: var(--text-secondary) }
+.desk-admin .hint { font-size: 12px; color: var(--text-muted); line-height: 1.5 }
+.desk-admin .sys-rows .hint { margin-top: 2px }
+.desk-admin .sys-files { display: flex; flex-wrap: wrap; gap: 6px; align-items: center }
+.desk-admin .set-grid .panel + .panel { margin-top: 12px }

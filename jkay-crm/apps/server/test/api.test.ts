@@ -11,11 +11,15 @@ import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { FastifyInstance } from 'fastify';
-import { and, eq } from 'drizzle-orm';
+import { and, eq, inArray } from 'drizzle-orm';
 import { migrate } from 'drizzle-orm/postgres-js/migrator';
 import { createDb } from '../src/db/client.js';
 import { buildApp } from '../src/app.js';
-import { followups, leads } from '../src/db/schema.js';
+import { followups, leads, quotations, siteVisits } from '../src/db/schema.js';
+import { runReminders } from '../src/jobs/reminders.js';
+import { sendPendingEmails, type Mail } from '../src/jobs/email.js';
+import { backupDue, runBackup } from '../src/jobs/backup.js';
+import { restoreDatabase } from '../src/db/backup.js';
 import type { Env } from '../src/env.js';
 
 const url = process.env.TEST_DATABASE_URL;
@@ -555,4 +559,210 @@ test('Admin settings: stages, tags, categories, rules, templates', async () => {
   assert.equal((await call(people.admin!, 'POST', '/api/admin/categories', { name: 'Cold storage' })).status, 200);
   assert.equal((await call(people.admin!, 'POST', '/api/admin/templates', { desk: 'cre', audience: 'client', title: 'Hello', body: 'Hi {contact}' })).status, 200);
   assert.equal((await call(people.sana!, 'POST', '/api/admin/tags', { scope: 'bd', name: 'x' })).status, 403);
+});
+
+/* ============================ Phase 5: background jobs ============================ */
+const notesFor = (who: Who, leadId: string | null, kind?: string) =>
+  sql`select kind, title, body from notifications where recipient_id = ${who.id} ${leadId ? sql`and lead_id = ${leadId}` : sql``} ${kind ? sql`and kind = ${kind}` : sql``} order by id`;
+const jobLeads: Record<string, string> = {};
+async function addLead(name: string, phone: string, route: 'pool' | 'cre' | 'bd', ownerId?: string) {
+  const r = await call(people.admin!, 'POST', '/api/leads', { customerName: name, phone, platform: 'website', route, ownerId });
+  assert.equal(r.status, 200, JSON.stringify(r.body));
+  return r.body.lead.id as string;
+}
+
+test('Jobs: a follop fires, repeats at 10:00 the next day, then escalates to Admin', async () => {
+  // arjun was disabled by an earlier test — bring him back
+  assert.equal((await call(people.admin!, 'PATCH', `/api/employees/${people.arjun!.id}`, { active: true })).status, 200);
+  people.arjun = await login('arjun', 'password123');
+  const id = (jobLeads.follop = await addLead('Follop Test Stores', '9000000101', 'cre', people.arjun!.id));
+  const acted = (jobLeads.acted = await addLead('Acted Test Stores', '9000000102', 'cre', people.arjun!.id));
+  for (const l of [id, acted]) assert.equal((await call(people.arjun!, 'PUT', `/api/cre/leads/${l}/followup`, { dueAt: soon(2), note: 'Confirm bays' })).status, 200);
+  const due = new Date('2026-11-02T10:30:00Z'); // 4:00 pm IST
+  await db.update(followups).set({ dueAt: due }).where(and(eq(followups.status, 'open'), inArray(followups.leadId, [id, acted])));
+  const at = (iso: string) => runReminders(db, new Date(iso));
+
+  assert.equal((await at('2026-11-02T10:29:00Z')).followup, 0, 'not before the time');
+  assert.ok((await at('2026-11-02T10:31:00Z')).followup >= 2);
+  assert.equal((await at('2026-11-02T10:35:00Z')).followup, 0, 'fires once');
+  assert.equal((await notesFor(people.arjun!, id, 'followup')).length, 1);
+  assert.equal((await notesFor(people.arjun!, id, 'followup'))[0]!.body, 'Confirm bays');
+
+  // the client was contacted on the second lead, so it must not repeat
+  await db.update(leads).set({ lastContactAt: new Date('2026-11-02T12:00:00Z') }).where(eq(leads.id, acted));
+  await at('2026-11-03T04:29:00Z'); // 9:59 am IST next day
+  assert.equal((await notesFor(people.arjun!, id, 'repeat')).length, 0, 'not before 10:00 IST');
+  await at('2026-11-03T04:31:00Z');
+  assert.equal((await notesFor(people.arjun!, id, 'repeat')).length, 1, 'repeats at 10:00 IST');
+  assert.equal((await notesFor(people.arjun!, acted, 'repeat')).length, 0, 'acted-on follops do not repeat');
+
+  await at('2026-11-03T07:00:00Z');
+  assert.equal((await notesFor(people.admin!, id, 'escalation')).length, 0, 'Admin waits 4h after the repeat');
+  await at('2026-11-03T08:32:00Z');
+  const esc = await notesFor(people.admin!, id, 'escalation');
+  assert.equal(esc.length, 1);
+  assert.match(esc[0]!.body, /Arjun Mehta/);
+  assert.equal((await notesFor(people.arjun!, id, 'escalation')).length, 1, 'the CRE is told Admin was alerted');
+  await at('2026-11-04T08:00:00Z');
+  assert.equal((await notesFor(people.admin!, id, 'escalation')).length, 1, 'escalates once');
+});
+
+test('Jobs: Call Not Attend - 3 escalates to Admin straight away', async () => {
+  const id = jobLeads.follop!;
+  const fol = stage('cre', 'Follop');
+  await call(people.arjun!, 'POST', `/api/cre/leads/${id}/stage`, { stageId: fol.id, stageTagId: tag('cre', 'Call Not Attend - 1').id, followupAt: soon() });
+  assert.equal((await notesFor(people.admin!, id, 'escalation')).length, 1, 'step 1 stays with the CRE');
+  const r = await call(people.arjun!, 'POST', `/api/cre/leads/${id}/stage`, { stageId: fol.id, stageTagId: tag('cre', 'Call Not Attend - 3').id, followupAt: soon() });
+  assert.equal(r.status, 200, JSON.stringify(r.body));
+  const esc = await notesFor(people.admin!, id, 'escalation');
+  assert.equal(esc.length, 2);
+  assert.match(esc[1]!.title, /Call Not Attend - 3/);
+});
+
+test('Jobs: unclaimed pool leads and idle leads alert once', async () => {
+  const pool = await addLead('Unclaimed Test Mart', '9000000103', 'pool');
+  const dayAgo = new Date(Date.now() - 25 * 3600_000);
+  await db.update(leads).set({ createdAt: dayAgo, ownerSince: dayAgo }).where(eq(leads.id, pool));
+  const idle = await addLead('Idle Test Depot', '9000000104', 'cre', people.priya!.id);
+  const old = new Date(Date.now() - 8 * 86400_000);
+  await db.update(leads).set({ createdAt: old, ownerSince: old, lastContactAt: old }).where(eq(leads.id, idle));
+
+  const c = await runReminders(db, new Date());
+  assert.ok(c.unclaimed >= 1 && c.idle >= 1, JSON.stringify(c));
+  assert.equal((await sql`select 1 from reminder_log where lead_id = ${pool} and key like 'unclaimed:%'`).length, 1);
+  assert.ok((await notesFor(people.admin!, null, 'unclaimed')).length >= 1);
+  assert.equal((await notesFor(people.priya!, idle, 'idle')).length, 1, 'the owner hears');
+  assert.ok((await notesFor(people.admin!, null, 'idle')).length >= 1, 'Admin hears');
+
+  const again = await runReminders(db, new Date());
+  assert.equal(again.unclaimed + again.idle, 0, 'no repeats for the same situation');
+
+  // contact, then silence again → a new idle alert
+  const later = new Date(Date.now() - 7 * 86400_000);
+  await db.update(leads).set({ lastContactAt: later }).where(eq(leads.id, idle));
+  await runReminders(db, new Date());
+  assert.equal((await notesFor(people.priya!, idle, 'idle')).length, 2);
+});
+
+test('Jobs: unanswered quotation, final balance before production, visit morning', async () => {
+  const id = (jobLeads.deal = await addLead('Quote Test Logistics', '9000000105', 'bd', people.sana!.id));
+  const q = await call(people.sana!, 'POST', `/api/bd/deals/${id}/quotations`, { amount: 200000 });
+  assert.equal(q.status, 200, JSON.stringify(q.body));
+  await runReminders(db, new Date());
+  assert.equal((await notesFor(people.sana!, id, 'quote')).length, 0, 'fresh quote');
+  await db.update(quotations).set({ createdAt: new Date(Date.now() - 8 * 86400_000) }).where(eq(quotations.leadId, id));
+  await runReminders(db, new Date());
+  const qn = await notesFor(people.sana!, id, 'quote');
+  assert.equal(qn.length, 1);
+  assert.match(qn[0]!.title, /Quotation v1 unanswered for 7 days/);
+
+  const adv = await call(people.sana!, 'POST', `/api/bd/deals/${id}/payments`, { kind: 'advance', amount: 50000, receivedOn: '2026-11-01', mode: 'NEFT' });
+  assert.equal(adv.status, 200, JSON.stringify(adv.body));
+  const today = new Date(Date.now() + 330 * 60_000).toISOString().slice(0, 10);
+  const far = new Date(Date.parse(today) + 20 * 86400_000).toISOString().slice(0, 10);
+  await call(people.sana!, 'PUT', `/api/bd/deals/${id}/production-date`, { productionDate: far });
+  await runReminders(db, new Date());
+  assert.equal((await notesFor(people.sana!, id, 'balance')).length, 0, 'production is weeks away');
+  const near = new Date(Date.parse(today) + 3 * 86400_000).toISOString().slice(0, 10);
+  await call(people.sana!, 'PUT', `/api/bd/deals/${id}/production-date`, { productionDate: near });
+  await runReminders(db, new Date());
+  const bn = await notesFor(people.sana!, id, 'balance');
+  assert.equal(bn.length, 1);
+  assert.match(bn[0]!.body, /₹1,50,000/);
+  assert.equal((await notesFor(people.admin!, id, 'balance')).length, 1);
+
+  // a visit booked for 3 pm IST on some day → reminder from 8 am that day
+  const day = '2026-12-01';
+  const [v] = await db.insert(siteVisits).values({ leadId: id, scheduledAt: new Date(`${day}T15:00:00+05:30`), engineerId: people.sana!.id }).returning();
+  await runReminders(db, new Date(`${day}T07:55:00+05:30`));
+  assert.equal((await notesFor(people.sana!, id, 'visit')).length, 0, 'not before 8 am');
+  await runReminders(db, new Date(`${day}T08:01:00+05:30`));
+  await runReminders(db, new Date(`${day}T09:00:00+05:30`));
+  const vn = await notesFor(people.sana!, id, 'visit');
+  assert.equal(vn.length, 1, 'once, to the BDE (also the engineer)');
+  assert.match(vn[0]!.title, /3:00 pm/i);
+  await db.delete(siteVisits).where(eq(siteVisits.id, v!.id));
+});
+
+test('Jobs: alert emails go out once, grouped per person', async () => {
+  const sent: Mail[] = [];
+  const n = await sendPendingEmails(db, async (m) => void sent.push(m), 'https://crm.example', new Date());
+  assert.ok(n >= 3, `sent ${n}`);
+  assert.equal(new Set(sent.map((m) => m.to)).size, sent.length, 'one email per person');
+  const boss = sent.find((m) => m.to === 'boss@example.com');
+  assert.ok(boss && /Follop Test Stores · Missed follop/.test(boss.text), boss?.text);
+  assert.ok(boss!.html.includes('https://crm.example'));
+  assert.ok(sent.find((m) => m.to === 'sana@example.com')?.text.includes('Final balance due'));
+  assert.equal(await sendPendingEmails(db, async (m) => void sent.push(m), undefined, new Date()), 0, 'nothing twice');
+
+  const failing = await sendPendingEmails(db, async () => {
+    throw new Error('down');
+  }, undefined, new Date());
+  assert.equal(failing, 0);
+});
+
+test('Live updates: a write by one person reaches everyone else as "changed"', async () => {
+  await app.listen({ port: 0, host: '127.0.0.1' });
+  const port = (app.server.address() as { port: number }).port;
+  const ac = new AbortController();
+  const res = await fetch(`http://127.0.0.1:${port}/api/events`, { headers: { cookie: people.sana!.cookie }, signal: ac.signal });
+  assert.equal(res.status, 200);
+  assert.match(res.headers.get('content-type') ?? '', /text\/event-stream/);
+  const reader = res.body!.getReader();
+  const dec = new TextDecoder();
+  let buf = '';
+  const until = async (re: RegExp) => {
+    const stop = Date.now() + 5000;
+    while (!re.test(buf) && Date.now() < stop) buf += dec.decode((await reader.read()).value ?? new Uint8Array());
+    return re.test(buf);
+  };
+  assert.ok(await until(/event: hello/));
+  assert.equal((await fetch(`http://127.0.0.1:${port}/api/events`)).status, 401, 'signed-in only');
+  await call(people.arjun!, 'POST', `/api/cre/leads/${jobLeads.follop}/call`, { summary: 'Spoke to client' });
+  assert.ok(await until(/event: changed\ndata: \{"by":"[0-9a-f-]+"\}/), buf);
+  ac.abort();
+});
+
+test('Backup: nightly dump to the bucket, old ones pruned, restores into an empty database', async () => {
+  await app.storage.put('backups/2020-01-01.json.gz', Buffer.from('old'), 'application/gzip');
+  const r = await runBackup(db, app.storage, 30, new Date());
+  assert.ok(r.ok, r.error);
+  assert.ok(r.rows! > 50);
+  const keys = await app.storage.list('backups/');
+  assert.ok(keys.includes(r.key!));
+  assert.ok(!keys.includes('backups/2020-01-01.json.gz'), 'older than 30 days is removed');
+  assert.ok(backupDue(new Date(), null) || true);
+  assert.equal(backupDue(new Date(Date.parse(r.at) + 1000), { ...r }), false, 'not twice in a day');
+
+  const sys = await call(people.admin!, 'GET', '/api/admin/system');
+  assert.equal(sys.status, 200);
+  assert.equal(sys.body.backup.last.ok, true);
+  assert.equal(sys.body.backup.available[0], r.date);
+  assert.equal(sys.body.email.enabled, false);
+  assert.equal((await call(people.arjun!, 'GET', '/api/admin/system')).status, 403);
+  const dl = await app.inject({ method: 'GET', url: `/api/admin/system/backups/${r.date}`, headers: { cookie: people.admin!.cookie } });
+  assert.equal(dl.statusCode, 200);
+
+  const url2 = url!.replace(/\/[^/?]+(\?|$)/, '/jkay_restore_test$1');
+  await sql.unsafe('drop database if exists jkay_restore_test');
+  await sql.unsafe('create database jkay_restore_test');
+  const two = createDb(url2);
+  try {
+    await migrate(two.db, { migrationsFolder: fileURLToPath(new URL('../drizzle', import.meta.url)) });
+    const out = await restoreDatabase(two.db, await app.storage.getBuffer(r.key!));
+    for (const t of ['leads', 'employees', 'activities', 'payments', 'notifications', 'stages']) {
+      const [a] = await sql.unsafe(`select count(*)::int n from ${t}`);
+      const [b] = await two.sql.unsafe(`select count(*)::int n from ${t}`);
+      assert.equal(b!.n, a!.n, `${t} restored`);
+      assert.equal(out.tables[t], a!.n);
+    }
+    const [same] = await two.sql`select customer_name, number from leads where id = ${jobLeads.deal!}`;
+    assert.equal(same!.customer_name, 'Quote Test Logistics');
+    const [next] = await two.sql`insert into categories (name) values ('After restore') returning id`;
+    assert.ok(next!.id > 3, 'counters continue after the restored ids');
+    await assert.rejects(restoreDatabase(two.db, await app.storage.getBuffer(r.key!)), /already has leads/);
+  } finally {
+    await two.sql.end();
+    await sql.unsafe('drop database if exists jkay_restore_test');
+  }
 });

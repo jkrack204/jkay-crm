@@ -536,6 +536,22 @@ export const notifications = pgTable(
   (t) => [index('notifications_recipient_idx').on(t.recipientId, t.createdAt)],
 );
 
+/**
+ * One row per alert the background jobs have already sent (unclaimed, idle,
+ * quote unanswered, final balance, visit day…). The key names the exact event,
+ * e.g. `idle:<lead>:<last contact>`, so each alert fires once and fires again
+ * only when the situation is new.
+ */
+export const reminderLog = pgTable(
+  'reminder_log',
+  {
+    key: text('key').primaryKey(),
+    leadId: uuid('lead_id').references(() => leads.id, { onDelete: 'cascade' }),
+    at: ts('at').notNull().defaultNow(),
+  },
+  (t) => [index('reminder_log_lead_idx').on(t.leadId)],
+);
+
 /* ============================ lead sources ============================== */
 /** One row per platform. Secrets are encrypted with SECRETS_KEY before they land here. */
 export const leadSources = pgTable('lead_sources', {

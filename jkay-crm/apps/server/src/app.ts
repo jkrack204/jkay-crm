@@ -22,12 +22,17 @@ import { bdRoutes } from './routes/bd.js';
 import { adminRoutes } from './routes/admin.js';
 import { fileRoutes, UPLOAD_LIMITS } from './routes/files.js';
 import fastifyMultipart from '@fastify/multipart';
+import { announceWrites, createEvents, eventRoutes, type Events } from './events.js';
+import type { JobsStatus } from './jobs/scheduler.js';
 
 declare module 'fastify' {
   interface FastifyInstance {
     db: DB;
     env: Env;
     storage: Storage;
+    events: Events;
+    /** Set when the background jobs run in this process (null in tests). */
+    jobs: JobsStatus | null;
   }
   interface FastifyRequest {
     user: SessionUser | null;
@@ -40,6 +45,9 @@ export async function buildApp(env: Env, db: DB, opts: { logger?: boolean; serve
   app.decorate('db', db);
   app.decorate('env', env);
   app.decorate('storage', createStorage(env));
+  app.decorate('events', createEvents());
+  app.decorate('jobs', null);
+  app.addHook('preClose', async () => app.events.closeAll());
   app.decorateRequest('user', null);
 
   await app.register(fastifyCookie);
@@ -57,6 +65,8 @@ export async function buildApp(env: Env, db: DB, opts: { logger?: boolean; serve
     return reply.code(500).send({ error: 'Something went wrong on the server' });
   });
 
+  announceWrites(app);
+
   app.get('/api/health', async () => {
     await db.execute(dsql`select 1`);
     return { ok: true, time: new Date().toISOString() };
@@ -71,6 +81,7 @@ export async function buildApp(env: Env, db: DB, opts: { logger?: boolean; serve
   await app.register(bdRoutes, { prefix: '/api/bd' });
   await app.register(adminRoutes, { prefix: '/api/admin' });
   await app.register(fileRoutes, { prefix: '/api/files' });
+  await app.register(eventRoutes, { prefix: '/api/events' });
 
   const webDist = fileURLToPath(new URL('../../web/dist', import.meta.url));
   if (opts.serveWeb !== false && existsSync(webDist)) {

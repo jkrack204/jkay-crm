@@ -30,6 +30,7 @@ const TABS = [
   ['rules', 'Rules & alerts'],
   ['templates', 'WhatsApp templates'],
   ['sources', 'Lead sources'],
+  ['system', 'Email & backups'],
 ] as const;
 type TabKey = (typeof TABS)[number][0];
 
@@ -60,6 +61,8 @@ export function AdminSettings() {
           <Rules lib={lib.data} />
         ) : tab === 'templates' ? (
           <Templates lib={lib.data} />
+        ) : tab === 'system' ? (
+          <System />
         ) : (
           <Sources />
         )}
@@ -418,7 +421,8 @@ function Rules({ lib }: { lib: Library }) {
           <RuleRow key={s.key} s={s} />
         ))}
         <div className="hint" style={{ marginTop: 10 }}>
-          The discount limit applies now. The alert timings are used by the reminders and escalations in the next build.
+          Reminders run every minute. A follop alerts its CRE at the set time, repeats at 10:00 the next morning if nobody acted on it,
+          and goes to every Admin 4 hours after that. Alerts that need attention are also emailed once email is switched on (Email &amp; backups).
         </div>
       </div>
     </div>
@@ -582,6 +586,129 @@ function Sources() {
             </div>
           );
         })}
+      </div>
+    </>
+  );
+}
+
+/* -------------------------------- system --------------------------------- */
+type SystemInfo = {
+  jobs: { running: boolean; lastTickAt?: string | null; lastError?: string | null; lastEmailError?: string | null };
+  email: { enabled: boolean; from: string; appUrl: string | null };
+  storage: 'bucket' | 'local' | 'none';
+  backup: {
+    last: { ok: boolean; date: string; at: string; key?: string; bytes?: number; rows?: number; error?: string; kept?: number } | null;
+    keepDays: number;
+    available: string[];
+    listError: string | null;
+    at: string;
+  };
+  liveClients: number;
+};
+const stamp = (iso: string) => new Date(iso).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', day: '2-digit', month: 'short', hour: 'numeric', minute: '2-digit' });
+const size = (b: number) => (b > 1_000_000 ? `${(b / 1_000_000).toFixed(1)} MB` : `${Math.max(1, Math.round(b / 1000))} KB`);
+const Dot = ({ ok, warn }: { ok: boolean; warn?: boolean }) => (
+  <span style={{ color: ok ? 'var(--signal-green)' : warn ? 'var(--signal-amber)' : 'var(--signal-red)', marginRight: 6 }}>●</span>
+);
+
+function System() {
+  const q = useQuery({ queryKey: ['admin', 'system'], queryFn: () => api.get<SystemInfo>('/admin/system'), refetchInterval: 60_000 });
+  const backup = useAction(() => api.post('/admin/system/backup'), { ok: 'Backup saved', invalidate: [['admin', 'system']] });
+  if (!q.data) return <div className="empty">{q.isError ? (q.error as Error).message : 'Loading…'}</div>;
+  const { jobs, email, storage, backup: b } = q.data;
+  return (
+    <>
+      <div className="panel">
+        <div className="panel__head">
+          <h3>Reminders &amp; live updates</h3>
+          <span className="count">run inside the app</span>
+        </div>
+        <div className="panel__body sys-rows">
+          <div>
+            <Dot ok={jobs.running && !jobs.lastError} warn={!jobs.running} />
+            {jobs.running ? (jobs.lastError ? `Last run failed: ${jobs.lastError}` : `Running · last check ${jobs.lastTickAt ? stamp(jobs.lastTickAt) : 'starting…'}`) : 'Not running in this copy of the app'}
+          </div>
+          <div>
+            <Dot ok />
+            {q.data.liveClients} {q.data.liveClients === 1 ? 'screen' : 'screens'} receiving live updates
+          </div>
+        </div>
+      </div>
+
+      <div className="panel">
+        <div className="panel__head">
+          <h3>Alert emails</h3>
+          <span className="count">{email.enabled ? 'on' : 'off'}</span>
+        </div>
+        <div className="panel__body sys-rows">
+          <div>
+            <Dot ok={email.enabled && !jobs.lastEmailError} warn={!email.enabled} />
+            {email.enabled ? (jobs.lastEmailError ? `Last send failed: ${jobs.lastEmailError}` : `Sending from ${email.from}`) : 'Off — alerts show in the bell only'}
+          </div>
+          {email.enabled && !email.appUrl && (
+            <div>
+              <Dot ok={false} warn />
+              Set APP_URL so emails link back to the CRM
+            </div>
+          )}
+          <div className="hint">
+            Emailed: repeat and missed follops, escalations, unclaimed and idle leads, unanswered quotations, final-balance and site-visit reminders, hand-offs,
+            transfers and discount requests — grouped into one email per person each minute. Each person's address is the one on their employee record.
+            {!email.enabled && ' To switch it on, the JK Racks sending domain has to be verified with the email service first.'}
+          </div>
+        </div>
+      </div>
+
+      <div className="panel">
+        <div className="panel__head">
+          <h3>Database backups</h3>
+          <span className="count">nightly at {b.at} IST · last {b.keepDays} days kept</span>
+        </div>
+        <div className="panel__body sys-rows">
+          {storage === 'none' ? (
+            <div>
+              <Dot ok={false} />
+              The storage bucket isn't set up, so nightly backups can't be saved. Railway's own database backups still run.
+            </div>
+          ) : (
+            <>
+              <div>
+                {b.last ? (
+                  <>
+                    <Dot ok={b.last.ok} />
+                    {b.last.ok
+                      ? `Last backup ${stamp(b.last.at)} · ${size(b.last.bytes ?? 0)} · ${b.last.rows?.toLocaleString('en-IN')} rows`
+                      : `Last attempt ${stamp(b.last.at)} failed: ${b.last.error}`}
+                  </>
+                ) : (
+                  <>
+                    <Dot ok={false} warn />
+                    No backup yet — the first one runs tonight, or take one now
+                  </>
+                )}
+              </div>
+              {b.listError && (
+                <div>
+                  <Dot ok={false} />
+                  Couldn't list saved backups: {b.listError}
+                </div>
+              )}
+              <div className="sys-files">
+                {b.available.slice(0, 10).map((d) => (
+                  <a key={d} className="btn btn-sm" href={`/api/admin/system/backups/${d}`}>
+                    ⤓ {d}
+                  </a>
+                ))}
+                {b.available.length > 10 && <span className="hint">+ {b.available.length - 10} older</span>}
+              </div>
+              <div>
+                <button className="btn btn-signal btn-sm" disabled={backup.isPending} onClick={() => backup.mutate(undefined)}>
+                  {backup.isPending ? 'Backing up…' : 'Back up now'}
+                </button>
+              </div>
+            </>
+          )}
+        </div>
       </div>
     </>
   );

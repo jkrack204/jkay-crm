@@ -23,8 +23,19 @@ const schema = z.object({
   /** Dev/tests only: keep uploaded files in this folder when no bucket is configured. */
   STORAGE_LOCAL_DIR: z.string().optional(),
 
-  EMAIL_FROM: z.string().default('JKAY CRM <alerts@jkayracks.in>'),
+  // Alert emails (Resend). Nothing is emailed until RESEND_API_KEY is set; EMAIL_FROM
+  // must be on a domain verified in Resend.
+  EMAIL_FROM: z.string().default('JK Racks CRM <alerts@jkayracks.in>'),
   RESEND_API_KEY: z.string().optional(),
+  /** The app's public address, used for the link in alert emails (e.g. https://crm.jkayracks.in). */
+  APP_URL: z.string().url().optional(),
+
+  /** Background jobs (reminders, emails, nightly backup). Tests and one-off scripts turn them off. */
+  JOBS_ENABLED: z
+    .enum(['true', 'false'])
+    .default('true')
+    .transform((v) => v === 'true'),
+  BACKUP_KEEP_DAYS: z.coerce.number().int().min(3).max(365).default(30),
 });
 
 export type Env = z.infer<typeof schema>;

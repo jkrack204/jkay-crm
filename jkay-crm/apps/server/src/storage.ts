@@ -8,10 +8,10 @@
  *
  * Local dev / tests: set STORAGE_LOCAL_DIR and files are kept on disk instead.
  */
-import { DeleteObjectCommand, GetObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
+import { DeleteObjectCommand, GetObjectCommand, ListObjectsV2Command, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { createReadStream } from 'node:fs';
-import { mkdir, rm, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import type { Env } from './env.js';
 import { HttpError } from './http.js';
@@ -65,6 +65,35 @@ export function createStorage(env: Env) {
       if (!client) throw notSetUp();
       const disp = `${download ? 'attachment' : 'inline'}; filename="${fileName.replace(/["\r\n]/g, '')}"`;
       return getSignedUrl(client, new GetObjectCommand({ Bucket: bucket, Key: key, ResponseContentDisposition: disp }), { expiresIn: 900 });
+    },
+
+    /** Keys under a prefix (used for backup retention). */
+    async list(prefix: string): Promise<string[]> {
+      if (client) {
+        const keys: string[] = [];
+        let token: string | undefined;
+        do {
+          const r = await client.send(new ListObjectsV2Command({ Bucket: bucket, Prefix: prefix, ContinuationToken: token }));
+          for (const o of r.Contents ?? []) if (o.Key) keys.push(o.Key);
+          token = r.IsTruncated ? r.NextContinuationToken : undefined;
+        } while (token);
+        return keys;
+      }
+      if (!localDir) throw notSetUp();
+      const dir = localPath(prefix.endsWith('/') ? prefix : dirname(prefix));
+      const names = await readdir(dir).catch(() => [] as string[]);
+      const base = prefix.endsWith('/') ? prefix : dirname(prefix) + '/';
+      return names.map((n) => base + n).filter((k) => k.startsWith(prefix));
+    },
+
+    /** Whole object as a Buffer (backups, restore). */
+    async getBuffer(key: string): Promise<Buffer> {
+      if (client) {
+        const r = await client.send(new GetObjectCommand({ Bucket: bucket, Key: key }));
+        return Buffer.from(await r.Body!.transformToByteArray());
+      }
+      if (!localDir) throw notSetUp();
+      return readFile(localPath(key));
     },
 
     /** Local mode only: a stream of the file. */

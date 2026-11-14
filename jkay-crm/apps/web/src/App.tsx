@@ -2,6 +2,7 @@ import { Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import type { ReactNode } from 'react';
 import type { Role } from '@jkay/shared';
 import { useMe, homeFor } from './lib/session';
+import { useLiveUpdates } from './lib/live';
 import { Login } from './pages/Login';
 import { CreDesk } from './desks/cre/CreDesk';
 import { AdminConsole } from './desks/admin/AdminConsole';
@@ -11,6 +12,7 @@ import { BdDesk } from './desks/bd/BdDesk';
 function Guard({ role, children }: { role: Role; children: ReactNode }) {
   const { data: me, isLoading } = useMe();
   const loc = useLocation();
+  useLiveUpdates(me?.role === role ? me.id : undefined);
   if (isLoading) return <div className="center-note">Loading…</div>;
   if (!me) return <Navigate to="/login" replace state={{ from: loc.pathname }} />;
   if (me.role !== role) return <Navigate to={homeFor(me.role)} replace />;

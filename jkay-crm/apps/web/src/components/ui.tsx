@@ -121,6 +121,9 @@ const N_KIND: Record<string, { ico: string; bg: string; fg: string }> = {
   visit: { ico: '⌖', bg: '#eff3f8', fg: '#3c5d87' },
   balance: { ico: '₹', bg: '#fdf3e2', fg: '#8a6a22' },
   discount: { ico: '%', bg: '#f4f0fb', fg: '#5c4b9b' },
+  unclaimed: { ico: '◷', bg: '#fdf3e2', fg: '#8a6a22' },
+  idle: { ico: '!', bg: '#f4f0fb', fg: '#5c4b9b' },
+  quote: { ico: '₹', bg: '#eff3f8', fg: '#3c5d87' },
 };
 
 export function Bell({ onOpenLead, footer }: { onOpenLead: (leadId: string, kind: string) => void; footer?: string }) {
@@ -129,7 +132,7 @@ export function Bell({ onOpenLead, footer }: { onOpenLead: (leadId: string, kind
   const { data } = useQuery({
     queryKey: ['notifications'],
     queryFn: () => api.get<{ unread: number; notifications: Notification[] }>('/notifications'),
-    refetchInterval: 30_000,
+    refetchInterval: 60_000, // live updates refresh it sooner
   });
   const readAll = useMutation({ mutationFn: () => api.post('/notifications/read-all'), onSuccess: () => qc.invalidateQueries({ queryKey: ['notifications'] }) });
   const readOne = useMutation({ mutationFn: (id: number) => api.post(`/notifications/${id}/read`), onSuccess: () => qc.invalidateQueries({ queryKey: ['notifications'] }) });

@@ -46,6 +46,8 @@ import {
 } from '../db/schema.js';
 import { badRequest, conflict, notFound, parse } from '../http.js';
 import { requireRole, type SessionUser } from '../auth/session.js';
+import { BACKUP_AT, BACKUP_PREFIX, lastBackup, runBackup } from '../jobs/backup.js';
+import { emailEnabled } from '../jobs/email.js';
 import { changeOwner, closeOpenFollowup, changeStage, employeeById, getLead, logActivity, notify, reassignFollowup, stageOfKind, type Lead, type Q } from '../services/leads.js';
 
 /* --------------------------------- rows ---------------------------------- */
@@ -493,5 +495,44 @@ export const adminRoutes: FastifyPluginAsync = async (app) => {
   app.delete<{ Params: { id: string } }>('/templates/:id', async (req) => {
     await db.delete(messageTemplates).where(and(eq(messageTemplates.id, Number(req.params.id)), isNull(messageTemplates.ownerId)));
     return { ok: true };
+  });
+
+  /* -------------------------------- system -------------------------------- */
+  /** Settings › System: background jobs, alert email and backups at a glance. */
+  app.get('/system', async () => {
+    let backups: string[] = [];
+    let listError: string | null = null;
+    if (app.storage.ready)
+      backups = (await app.storage.list(BACKUP_PREFIX).catch((e: Error) => ((listError = e.message), [] as string[])))
+        .map((k) => /(\d{4}-\d{2}-\d{2})\.json\.gz$/.exec(k)?.[1])
+        .filter((d): d is string => !!d)
+        .sort()
+        .reverse();
+    return {
+      jobs: app.jobs ? { running: true, ...app.jobs } : { running: false },
+      email: { enabled: emailEnabled(app.env), from: app.env.EMAIL_FROM, appUrl: app.env.APP_URL ?? null },
+      storage: app.storage.mode,
+      backup: { last: await lastBackup(db), keepDays: app.env.BACKUP_KEEP_DAYS, available: backups, listError, at: BACKUP_AT },
+      liveClients: app.events.count,
+    };
+  });
+
+  /** Take a backup now (e.g. right after setting up the bucket, or before a risky change). */
+  app.post('/system/backup', async () => {
+    const r = await runBackup(db, app.storage, app.env.BACKUP_KEEP_DAYS);
+    if (!r.ok) throw badRequest(`Backup failed: ${r.error}`);
+    return r;
+  });
+
+  /** Download one backup file (signed bucket link; local mode streams it). */
+  app.get<{ Params: { date: string } }>('/system/backups/:date', async (req, reply) => {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(req.params.date)) throw notFound();
+    const key = `${BACKUP_PREFIX}${req.params.date}.json.gz`;
+    const name = `jkay-crm-backup-${req.params.date}.json.gz`;
+    if (app.storage.mode === 'local') {
+      reply.header('Content-Disposition', `attachment; filename="${name}"`).type('application/gzip');
+      return reply.send(app.storage.localStream(key));
+    }
+    return reply.redirect(await app.storage.viewUrl(key, name, true));
   });
 };

@@ -43,6 +43,7 @@ import {
   type Q,
 } from '../services/leads.js';
 import { leadDetail } from './leads.js';
+import { cnaStep, settings } from '../jobs/reminders.js';
 
 const DEFAULT_MAX_OPEN = 30;
 /** "19 Oct, 10:00 am" in IST, for activity-log text. */
@@ -293,6 +294,18 @@ export const creRoutes: FastifyPluginAsync = async (app) => {
         body: input.followupAt ? `Next follop ${ist(input.followupAt)}` : null,
         meta: { stageId: stage.id, stageTagId },
       });
+      // "Call Not Attend - 3" (or whatever step Admin set) escalates to Admin.
+      const step = cnaStep(tagName);
+      if (step && step >= (await settings(tx)).cnaEscalateAt) {
+        const owner = l.ownerId ? await employeeById(tx, l.ownerId) : null;
+        await notify(tx, (await activeAdminIds(tx)).filter((a) => a !== u.id), {
+          kind: 'escalation',
+          leadId: l.id,
+          title: tagName,
+          body: `${owner?.fullName ?? u.fullName} has missed the client ${step} times.`,
+        });
+        await notify(tx, [l.ownerId], { kind: 'escalation', leadId: l.id, title: 'Admin alerted', body: `${tagName} reached.` });
+      }
       await notifyWatchers(tx, l.id, `${l.customerName} moved to ${stage.name}`, undefined, u.id);
     });
     return detail(u, req.params.id);
