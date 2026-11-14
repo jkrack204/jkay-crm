@@ -85,6 +85,14 @@ These run inside the same app service, once a minute — nothing extra to deploy
   `backups/YYYY-MM-DD.json.gz` (last `BACKUP_KEEP_DAYS`, default 30). Admin can download any of
   them or take one now from Settings › Email & backups. This is on top of Railway's own backups.
 
+**Demo data** (for showing the CRM before real leads arrive)
+1. Railway › app service › Variables: `DEMO_DATA` = `true`.
+2. Admin › Settings › **Demo data** › **Load demo data** — about 24 sample leads across every stage,
+   3 demo CREs and 2 demo BDEs (logins and password shown on that page).
+3. After the demo: **Remove demo data** (only the sample records) or **Erase all leads** (every lead,
+   demo or not, plus files and alerts; lead numbers restart at #1; type ERASE to confirm).
+4. Delete the `DEMO_DATA` variable — the page and its buttons disappear.
+
 **Restoring a backup** (into a new, empty database):
 1. Railway: **+ Create → Database → PostgreSQL** (a new one).
 2. Locally, with `DATABASE_URL` set to the new database's public URL (turn its TCP proxy on for

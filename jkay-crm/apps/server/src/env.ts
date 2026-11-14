@@ -36,6 +36,12 @@ const schema = z.object({
     .default('true')
     .transform((v) => v === 'true'),
   BACKUP_KEEP_DAYS: z.coerce.number().int().min(3).max(365).default(30),
+
+  /** "true" shows Admin › Settings › Demo data (load / remove demo data, erase all leads). Remove it after the demo. */
+  DEMO_DATA: z
+    .enum(['true', 'false'])
+    .default('false')
+    .transform((v) => v === 'true'),
 });
 
 export type Env = z.infer<typeof schema>;

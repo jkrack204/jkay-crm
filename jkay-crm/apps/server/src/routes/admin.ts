@@ -48,6 +48,7 @@ import { badRequest, conflict, notFound, parse } from '../http.js';
 import { requireRole, type SessionUser } from '../auth/session.js';
 import { BACKUP_AT, BACKUP_PREFIX, lastBackup, runBackup } from '../jobs/backup.js';
 import { emailEnabled } from '../jobs/email.js';
+import { demoStatus, eraseAll, loadDemo, removeDemo } from '../db/demo.js';
 import { changeOwner, closeOpenFollowup, changeStage, employeeById, getLead, logActivity, notify, reassignFollowup, stageOfKind, type Lead, type Q } from '../services/leads.js';
 
 /* --------------------------------- rows ---------------------------------- */
@@ -514,7 +515,30 @@ export const adminRoutes: FastifyPluginAsync = async (app) => {
       storage: app.storage.mode,
       backup: { last: await lastBackup(db), keepDays: app.env.BACKUP_KEEP_DAYS, available: backups, listError, at: BACKUP_AT },
       liveClients: app.events.count,
+      demo: app.env.DEMO_DATA ? { enabled: true, ...(await demoStatus(db)) } : { enabled: false },
     };
+  });
+
+  /* ------------------------------- demo data ------------------------------- */
+  const demoOn = () => {
+    if (!app.env.DEMO_DATA) throw notFound('Demo tools are switched off (set DEMO_DATA=true to use them)');
+  };
+  const fail = (e: unknown) => badRequest((e as Error).message);
+  app.post('/system/demo/load', async (req) => {
+    demoOn();
+    const u = requireRole(req, 'admin');
+    return loadDemo(db, app.storage, u.id).catch((e) => {
+      throw fail(e);
+    });
+  });
+  app.post('/system/demo/remove', async () => {
+    demoOn();
+    return removeDemo(db, app.storage);
+  });
+  app.post<{ Body: { confirm?: string } }>('/system/demo/erase', async (req) => {
+    demoOn();
+    if (req.body?.confirm !== 'ERASE') throw badRequest('Type ERASE to confirm');
+    return eraseAll(db, app.storage);
   });
 
   /** Take a backup now (e.g. right after setting up the bucket, or before a risky change). */

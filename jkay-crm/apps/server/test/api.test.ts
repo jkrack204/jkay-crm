@@ -79,6 +79,8 @@ before(async () => {
     BUCKET_PATH_STYLE: false,
     STORAGE_LOCAL_DIR: mkdtempSync(join(tmpdir(), 'jkay-files-')),
     EMAIL_FROM: 'x',
+    DEMO_DATA: true,
+    BACKUP_KEEP_DAYS: 30,
   } as Env;
   app = await buildApp(env, db, { logger: false, serveWeb: false });
 });
@@ -766,3 +768,69 @@ test('Backup: nightly dump to the bucket, old ones pruned, restores into an empt
     await sql.unsafe('drop database if exists jkay_restore_test');
   }
 });
+
+test('Demo data: loads across every stage, logs in, removes cleanly, and erase-all wipes every lead', async () => {
+  const realBefore = (await sql`select count(*)::int n from leads`)[0]!.n;
+  assert.equal((await call(people.arjun!, 'POST', '/api/admin/system/demo/load')).status, 403, 'Admin only');
+  const load = await call(people.admin!, 'POST', '/api/admin/system/demo/load');
+  assert.equal(load.status, 200, JSON.stringify(load.body));
+  assert.ok(load.body.leads >= 20 && load.body.leads <= 30, `leads ${load.body.leads}`);
+  assert.ok(load.body.files >= 6);
+  assert.equal((await call(people.admin!, 'POST', '/api/admin/system/demo/load')).status, 400, 'not twice');
+
+  const sys = (await call(people.admin!, 'GET', '/api/admin/system')).body;
+  assert.equal(sys.demo.enabled, true);
+  assert.equal(sys.demo.users.length, 5);
+  assert.equal(sys.demo.password, load.body.password);
+
+  // every stage on both desks has something in it
+  const per = await sql`select s.desk, s.kind, s.name, count(l.id)::int n from stages s
+    left join leads l on (l.cre_stage_id = s.id and l.desk = 'cre') or (l.bd_stage_id = s.id and l.desk = 'bd')
+    where s.archived_at is null and (l.external_ref like 'demo:%' or l.id is null) group by 1,2,3`;
+  for (const r of per) if (r.kind !== 'handoff') assert.ok(r.n > 0, `${r.desk} ${r.name} is empty`);
+
+  const cre = await login('demo.arjun', load.body.password);
+  const pool = await call(cre, 'GET', '/api/cre/leads?scope=pool');
+  assert.ok(pool.body.leads.length >= 3);
+  const mine = await call(cre, 'GET', '/api/cre/leads?scope=mine');
+  assert.equal(mine.status, 200);
+  assert.equal((await call(cre, 'GET', '/api/cre/dashboard')).status, 200);
+  const [wonRow] = await sql`select l.id, e.username from leads l join employees e on e.id = l.owner_id where l.won_at is not null and l.external_ref like 'demo:%' limit 1`;
+  assert.ok(wonRow, 'a won deal');
+  const bde = await login(wonRow!.username, load.body.password);
+  const deals = await call(bde, 'GET', '/api/bd/deals');
+  assert.equal(deals.status, 200);
+  const won = deals.body.deals.find((d: any) => d.id === wonRow!.id);
+  assert.ok(won, 'the BDE sees their won deal');
+  const d = await call(bde, 'GET', `/api/bd/deals/${won.id}`);
+  assert.equal(d.status, 200, JSON.stringify(d.body));
+  assert.ok(d.body.bd.quotations.length >= 1 && d.body.bd.cad.length >= 1 && d.body.bd.payments.length >= 1);
+  const file = await app.inject({ method: 'GET', url: `/api/files/${d.body.bd.quotations[0].attachmentId}`, headers: { cookie: bde.cookie } });
+  assert.equal(file.statusCode, 200, 'the demo quotation PDF opens');
+  assert.match(file.body.slice(0, 8), /%PDF/);
+  const disc = await call(people.admin!, 'GET', '/api/bd/discounts');
+  assert.ok(disc.body.requests.some((x: any) => x.status === 'pending'), 'a discount waits for Admin');
+  const dash = await call(people.admin!, 'GET', '/api/admin/records?scope=all');
+  assert.ok(dash.body.records.length >= realBefore + 20);
+  await runReminders(db, new Date());
+
+  const rem = await call(people.admin!, 'POST', '/api/admin/system/demo/remove');
+  assert.equal(rem.status, 200, JSON.stringify(rem.body));
+  assert.equal(rem.body.users.removed, 5);
+  assert.equal(rem.body.filesFailed, 0);
+  assert.equal((await sql`select count(*)::int n from leads`)[0]!.n, realBefore, 'real leads untouched');
+  assert.equal((await sql`select count(*)::int n from employees where username like 'demo.%'`)[0]!.n, 0);
+  assert.ok(!(await app.storage.list('leads/')).some((k) => k.includes('/demo-')), 'demo files left the bucket');
+  assert.equal((await call(cre, 'GET', '/api/auth/me')).status, 401, 'demo logins are gone');
+
+  await call(people.admin!, 'POST', '/api/admin/system/demo/load');
+  assert.equal((await call(people.admin!, 'POST', '/api/admin/system/demo/erase', { confirm: 'erase' })).status, 400);
+  const er = await call(people.admin!, 'POST', '/api/admin/system/demo/erase', { confirm: 'ERASE' });
+  assert.equal(er.status, 200, JSON.stringify(er.body));
+  assert.equal((await sql`select count(*)::int n from leads`)[0]!.n, 0);
+  assert.equal((await app.storage.list('leads/')).length, 0);
+  assert.ok((await sql`select count(*)::int n from employees`)[0]!.n >= 4, 'real employees stay');
+  const fresh = await call(people.admin!, 'POST', '/api/leads', { customerName: 'First Real Client', phone: '9000000999', platform: 'walkin', route: 'pool' });
+  assert.equal(fresh.body.lead.number, 1, 'lead numbers start again at 1');
+});
+

@@ -161,3 +161,9 @@ a.btn { text-decoration: none; }
 .desk-admin .sys-rows .hint { margin-top: 2px }
 .desk-admin .sys-files { display: flex; flex-wrap: wrap; gap: 6px; align-items: center }
 .desk-admin .set-grid .panel + .panel { margin-top: 12px }
+
+/* Admin › Settings › Demo data */
+.desk-admin .demo-pass { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; background: var(--steel-850); color: var(--text-strong); padding: 2px 7px; border-radius: 5px; user-select: all }
+.desk-admin .demo-users { display: grid; gap: 6px }
+.desk-admin .demo-users > div { display: grid; grid-template-columns: minmax(110px, 140px) 1fr auto; gap: 10px; align-items: center; padding: 6px 0; border-bottom: 1px solid var(--line-soft) }
+.desk-admin .demo-users b { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12.5px; font-weight: 600; color: var(--text-strong) }

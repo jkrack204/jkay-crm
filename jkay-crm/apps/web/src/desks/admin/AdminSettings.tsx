@@ -31,6 +31,7 @@ const TABS = [
   ['templates', 'WhatsApp templates'],
   ['sources', 'Lead sources'],
   ['system', 'Email & backups'],
+  ['demo', 'Demo data'],
 ] as const;
 type TabKey = (typeof TABS)[number][0];
 
@@ -38,11 +39,13 @@ export function AdminSettings() {
   const [p, setP] = useSearchParams();
   const tab = (TABS.find((t) => t[0] === p.get('tab'))?.[0] ?? 'stages') as TabKey;
   const lib = useLibrary();
+  const sys = useSystem();
+  const tabs = TABS.filter(([k]) => k !== 'demo' || sys.data?.demo.enabled);
   return (
     <div className="set-grid">
       <div className="set-rail">
         <div className="set-rail__g">Settings</div>
-        {TABS.map(([k, l]) => (
+        {tabs.map(([k, l]) => (
           <a key={k} className={tab === k ? 'on' : ''} onClick={() => setP({ tab: k })}>
             {l}
           </a>
@@ -63,6 +66,8 @@ export function AdminSettings() {
           <Templates lib={lib.data} />
         ) : tab === 'system' ? (
           <System />
+        ) : tab === 'demo' ? (
+          <DemoData />
         ) : (
           <Sources />
         )}
@@ -604,7 +609,11 @@ type SystemInfo = {
     at: string;
   };
   liveClients: number;
+  demo:
+    | { enabled: false }
+    | { enabled: true; loaded: boolean; leads: number; users: { username: string; name: string; role: string }[]; password: string | null; loadedAt: string | null };
 };
+const useSystem = () => useQuery({ queryKey: ['admin', 'system'], queryFn: () => api.get<SystemInfo>('/admin/system'), refetchInterval: 60_000 });
 const stamp = (iso: string) => new Date(iso).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', day: '2-digit', month: 'short', hour: 'numeric', minute: '2-digit' });
 const size = (b: number) => (b > 1_000_000 ? `${(b / 1_000_000).toFixed(1)} MB` : `${Math.max(1, Math.round(b / 1000))} KB`);
 const Dot = ({ ok, warn }: { ok: boolean; warn?: boolean }) => (
@@ -612,7 +621,7 @@ const Dot = ({ ok, warn }: { ok: boolean; warn?: boolean }) => (
 );
 
 function System() {
-  const q = useQuery({ queryKey: ['admin', 'system'], queryFn: () => api.get<SystemInfo>('/admin/system'), refetchInterval: 60_000 });
+  const q = useSystem();
   const backup = useAction(() => api.post('/admin/system/backup'), { ok: 'Backup saved', invalidate: [['admin', 'system']] });
   if (!q.data) return <div className="empty">{q.isError ? (q.error as Error).message : 'Loading…'}</div>;
   const { jobs, email, storage, backup: b } = q.data;
@@ -713,3 +722,101 @@ function System() {
     </>
   );
 }
+
+/* ------------------------------- demo data ------------------------------- */
+const everything = [[]] as unknown[][];
+function DemoData() {
+  const q = useSystem();
+  const [word, setWord] = useState('');
+  const load = useAction(() => api.post<{ leads: number }>('/admin/system/demo/load'), { ok: (o) => `Loaded ${o.leads} demo leads`, invalidate: everything });
+  const remove = useAction(() => api.post<{ leads: number }>('/admin/system/demo/remove'), { ok: (o) => `Removed ${o.leads} demo leads`, invalidate: everything });
+  const erase = useAction(() => api.post<{ leads: number }>('/admin/system/demo/erase', { confirm: word }), {
+    ok: (o) => `Erased ${o.leads} leads — the CRM is empty`,
+    invalidate: everything,
+  });
+  const d = q.data?.demo;
+  if (!d || !d.enabled) return <div className="empty">{q.isError ? (q.error as Error).message : 'Loading…'}</div>;
+  const busy = load.isPending || remove.isPending || erase.isPending;
+  return (
+    <>
+      <div className="pipe-hint">
+        <span>◆</span>
+        <span>
+          For showing the CRM before real leads arrive. When you're done, erase everything and remove the <b>DEMO_DATA</b> variable in Railway — this
+          page disappears with it.
+        </span>
+      </div>
+
+      <div className="panel">
+        <div className="panel__head">
+          <h3>Demo data</h3>
+          <span className="count">{d.loaded ? `${d.leads} demo leads loaded` : 'not loaded'}</span>
+        </div>
+        <div className="panel__body sys-rows">
+          {d.loaded ? (
+            <>
+              <div>
+                Sign in as any of these to show their desk. They all use the password{' '}
+                <code className="demo-pass">{d.password ?? '—'}</code>
+              </div>
+              <div className="demo-users">
+                {d.users.map((u) => (
+                  <div key={u.username}>
+                    <b>{u.username}</b>
+                    <span>{u.name}</span>
+                    <Pill tone={u.role === 'cre' ? 'blue' : 'violet'}>{u.role === 'cre' ? 'CRE' : 'BDE'}</Pill>
+                  </div>
+                ))}
+              </div>
+              <div className="hint">
+                Your own Admin login sees all of it in the Admin console. Demo leads are marked inside the CRM, so removing them leaves anything else alone.
+              </div>
+              <div>
+                <button className="btn btn-sm" disabled={busy} onClick={() => remove.mutate(undefined)}>
+                  {remove.isPending ? 'Removing…' : 'Remove demo data'}
+                </button>
+              </div>
+            </>
+          ) : (
+            <>
+              <div>
+                Adds about 24 sample leads from the last three months across every stage of both desks — calls, follops, site visits, drawings, quotations,
+                a pending discount, payments, wins and losses — plus 3 demo CREs and 2 demo BDEs.
+              </div>
+              <div>
+                <button className="btn btn-signal btn-sm" disabled={busy} onClick={() => load.mutate(undefined)}>
+                  {load.isPending ? 'Loading… (a few seconds)' : 'Load demo data'}
+                </button>
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+
+      <div className="panel">
+        <div className="panel__head">
+          <h3>Erase all leads</h3>
+          <span className="count">before going live</span>
+        </div>
+        <div className="panel__body sys-rows">
+          <div>
+            Deletes <b>every</b> lead — demo or not — with its calls, notes, files, visits, quotations, payments and alerts, removes the demo logins, and
+            starts lead numbers again at #1. Employees, stages, tags, categories, rules and templates stay. This can't be undone (the nightly backup is
+            the only copy).
+          </div>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+            <input className="set-ctl" placeholder="Type ERASE" value={word} onChange={(e) => setWord(e.target.value)} style={{ width: 140 }} />
+            <button
+              className="btn btn-sm btn-danger"
+              disabled={word !== 'ERASE' || busy}
+              onClick={() => erase.mutate(undefined, { onSuccess: () => setWord('') })}
+            >
+              {erase.isPending ? 'Erasing…' : 'Erase all leads'}
+            </button>
+          </div>
+        </div>
+      </div>
+    </>
+  );
+}
+

@@ -12,7 +12,7 @@ import { DeleteObjectCommand, GetObjectCommand, ListObjectsV2Command, PutObjectC
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { createReadStream } from 'node:fs';
 import { mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
-import { dirname, join, resolve } from 'node:path';
+import { dirname, join, relative, resolve, sep } from 'node:path';
 import type { Env } from './env.js';
 import { HttpError } from './http.js';
 
@@ -80,10 +80,13 @@ export function createStorage(env: Env) {
         return keys;
       }
       if (!localDir) throw notSetUp();
-      const dir = localPath(prefix.endsWith('/') ? prefix : dirname(prefix));
-      const names = await readdir(dir).catch(() => [] as string[]);
+      // same as the bucket: every file under the prefix, at any depth
       const base = prefix.endsWith('/') ? prefix : dirname(prefix) + '/';
-      return names.map((n) => base + n).filter((k) => k.startsWith(prefix));
+      const entries = await readdir(localPath(base), { recursive: true, withFileTypes: true }).catch(() => []);
+      return entries
+        .filter((e) => e.isFile())
+        .map((e) => relative(localDir, join(e.parentPath, e.name)).split(sep).join('/'))
+        .filter((k) => k.startsWith(prefix));
     },
 
     /** Whole object as a Buffer (backups, restore). */
